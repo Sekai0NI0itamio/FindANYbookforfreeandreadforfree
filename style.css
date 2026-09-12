@@ -18,6 +18,7 @@ body:not(.searched) #brand{padding:0 0 3vh}
 #q{width:100%;padding:15px 18px;font-size:18px;border:2px solid var(--ink);border-radius:4px;background:var(--card);color:var(--ink)}
 #q:focus{outline:3px solid var(--amber);outline-offset:1px}
 #status{text-align:center;color:var(--muted);min-height:1.6em;margin:12px 0 6px;font-size:13.5px;letter-spacing:.02em}
+#status:empty{display:none;min-height:0;margin:0}
 #try{text-align:center;margin:14px 0 4px;font-size:13.5px;color:var(--muted)}
 #try button,#tryempty button{background:var(--card);border:1.5px solid var(--hair);border-radius:20px;padding:4px 14px;margin:0 4px;font-size:13px;color:var(--ink);cursor:pointer}
 #try button:hover,#tryempty button:hover{border-color:var(--amber);color:var(--amber)}
