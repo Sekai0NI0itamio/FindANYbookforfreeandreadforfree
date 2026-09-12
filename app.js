@@ -4,6 +4,20 @@ const resultsEl = document.getElementById('results');
 const mem = new Map();
 let ctl = null;
 let debounceT = 0;
+let runSeq = 0;
+let animT = 0;
+let liveCount = 0;
+
+function animateStatus(base) {
+  clearInterval(animT);
+  let n = 0;
+  animT = setInterval(() => {
+    n = (n + 1) % 4;
+    statusEl.textContent = base + '.'.repeat(n) + (liveCount ? ' · ' + liveCount + ' found' : '');
+  }, 350);
+}
+
+function stopAnimate() { clearInterval(animT); }
 
 function norm(s) {
   return String(s || '').toLowerCase().trim().replace(/\s+/g, ' ');
@@ -314,7 +328,7 @@ function yearText(d) {
   return /^\d{4}$/.test(String(y)) ? String(y) : '';
 }
 
-let sortMode = 'smart', lastRanked = [], lastWords = [];
+let lastWords = [];
 
 function hi(t) {
   let s = esc(t);
@@ -329,16 +343,12 @@ function hi(t) {
 function sortDocs(list) {
   const arr = [...list];
   const tier = { free: 0, borrow: 1, unknown: 2, pay: 3 };
-  const pagesDesc = (a, b) => (b.pages || 0) - (a.pages || 0);
   arr.sort((a, b) => {
     if (a.mismatch !== b.mismatch) return a.mismatch - b.mismatch;
-    if (sortMode === 'pages') return pagesDesc(a, b) || (b.score - a.score);
-    if (sortMode === 'title') return (b.score - a.score) || pagesDesc(a, b);
     const al = tier[a.access.kind] ?? 2, bl = tier[b.access.kind] ?? 2;
     if (al !== bl) return al - bl;
-    if (sortMode === 'free') return (b.score - a.score) || pagesDesc(a, b);
     if (b.score !== a.score) return b.score - a.score;
-    return pagesDesc(a, b);
+    return (b.pages || 0) - (a.pages || 0);
   });
   return arr;
 }
@@ -385,49 +395,52 @@ async function runSearch(raw, opts) {
   if (query.length < 4) {
     statusEl.textContent = query.length < 2 ? 'Type a book title to search Internet Archive.' : 'Keep typing…';
     if (!query) resultsEl.innerHTML = '';
-    document.getElementById('toolbar').hidden = true;
+    stopAnimate();
     document.body.classList.remove('searched');
     return;
   }
   const key = norm(query);
   const hit = cacheGet(key);
   document.body.classList.toggle('searched', query.length >= 4);
-  const toolbar = document.getElementById('toolbar');
-  const countEl = document.getElementById('count');
   lastWords = sig(words(query));
-  const showCount = (n, extra) => {
-    toolbar.hidden = false;
-    countEl.textContent = n + (n === 1 ? ' book' : ' books') + (extra || '');
-  };
+  stopAnimate();
   if (hit) {
-    lastRanked = hit;
-    statusEl.textContent = '';
-    showCount(hit.length, ' (cached)');
+    statusEl.textContent = hit.length + (hit.length === 1 ? ' book' : ' books') + ' (cached)';
     render(sortDocs(hit));
     if (opts && opts.fromCache) return;
   } else {
-    statusEl.textContent = 'Searching Internet Archive…';
+    resultsEl.innerHTML = '';
   }
   if (ctl) ctl.abort();
   ctl = new AbortController();
+  const my = ++runSeq;
+  liveCount = 0;
+  animateStatus('Searching Internet Archive');
   try {
     const queries = buildQueries(query);
     let docs = [];
     for (const qq of queries) {
       const got = await fetchSearch(qq, ctl.signal);
-      for (const d of got) if (!docs.find(x => x.identifier === d.identifier)) docs.push(d);
+      if (my !== runSeq) return;
+      let added = 0;
+      for (const d of got) if (!docs.find(x => x.identifier === d.identifier)) { docs.push(d); added++; }
+      if (added) {
+        liveCount = docs.length;
+        render(sortDocs(rankResults(docs, query).slice(0, 20)));
+      }
       if (docs.length >= 12) break;
     }
     await olEnrich(docs, query, ctl.signal);
+    if (my !== runSeq) return;
     const ranked = rankResults(docs, query).slice(0, 20);
     cacheSet(key, ranked);
     if (norm(qEl.value) !== key) return;
-    lastRanked = ranked;
-    statusEl.textContent = '';
-    showCount(ranked.length);
+    stopAnimate();
+    statusEl.textContent = ranked.length + (ranked.length === 1 ? ' book' : ' books') + ' found';
     render(sortDocs(ranked));
   } catch (e) {
     if (e && e.name === 'AbortError') return;
+    stopAnimate();
     const stale = cacheGet(key);
     if (stale) {
       statusEl.textContent = stale.length + ' books found (cached)';
@@ -464,11 +477,6 @@ qEl.addEventListener('keydown', (e) => {
 resultsEl.addEventListener('click', (e) => {
   const b = e.target.closest('[data-dl]');
   if (b) openDownloads(b.getAttribute('data-dl'), b.getAttribute('data-title') || '', b.getAttribute('data-kind') || 'unknown');
-});
-
-document.getElementById('sort').addEventListener('change', (e) => {
-  sortMode = e.target.value;
-  if (lastRanked.length) render(sortDocs(lastRanked));
 });
 
 document.addEventListener('click', (e) => {
