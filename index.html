@@ -3,19 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>BookLibrary — Every book, verified</title>
+<title>Find For Free — Books, Video, Anime, Music</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23f5efe1'/%3E%3Cpath d='M20 12h18a8 8 0 0 1 8 8v32H28a8 8 0 0 0-8 8z' fill='%23b3541e'/%3E%3Cpath d='M20 12v40' stroke='%232b2417' stroke-width='4'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css?v=20260912h">
 </head>
 <body>
 <header id="masthead">
   <div id="brand">
-    <div id="plate">BOOK&thinsp;·&thinsp;LIBRARY</div>
-    <h1>Find where you can actually read a book.</h1>
-    <p class="sub">Search Internet Archive texts. Page counts, ratings and access verified live.</p>
+    <div id="plate">FIND&thinsp;·&thinsp;FOR&thinsp;·&thinsp;FREE</div>
+    <h1>Find For Free.</h1>
+    <p class="sub">Free books, videos, anime, and music — see what you can actually access.</p>
   </div>
   <div id="searchbar">
-    <input id="q" type="search" placeholder="Title and author — e.g. High Output Management Grove" autocomplete="off" autofocus>
+    <input id="q" type="search" placeholder="Title — e.g. High Output Management" autocomplete="off" autofocus>
+    <select id="cat" aria-label="Category"><option value="books">Books</option><option value="video">Video</option><option value="anime">Anime</option><option value="music">Music</option></select>
   </div>
   <div id="try">Try: <button data-try="High Output Management">High Output Management</button><button data-try="Lord of the Flies">Lord of the Flies</button><button data-try="Pride and Prejudice">Pride and Prejudice</button></div>
   <div id="status" role="status"></div>

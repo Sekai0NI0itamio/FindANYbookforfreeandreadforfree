@@ -14,7 +14,9 @@ body:not(.searched) #brand{padding:0 0 3vh}
 #plate{display:inline-block;border:2px solid var(--ink);padding:6px 22px;letter-spacing:.35em;font-size:13px;font-weight:700;background:var(--card)}
 #brand h1{font-family:var(--serif);font-size:44px;margin:24px 0 10px;line-height:1.08;letter-spacing:-.01em}
 #brand .sub{color:var(--muted);margin:0 0 28px;font-size:16px}
-#searchbar{max-width:640px;margin:0 auto}
+#searchbar{max-width:640px;margin:0 auto;display:flex;gap:8px}
+#searchbar #q{flex:1;min-width:0}
+#cat{flex:none;background:var(--card);border:2px solid var(--ink);border-radius:4px;color:var(--ink);font-size:15px;padding:0 10px;cursor:pointer}
 #q{width:100%;padding:15px 18px;font-size:18px;border:2px solid var(--ink);border-radius:4px;background:var(--card);color:var(--ink)}
 #q:focus{outline:3px solid var(--amber);outline-offset:1px}
 #status{text-align:center;color:var(--muted);min-height:1.6em;margin:12px 0 6px;font-size:13.5px;letter-spacing:.02em}

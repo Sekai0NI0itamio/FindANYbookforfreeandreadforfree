@@ -14,3 +14,4 @@
 - [ ] Query words highlighted in titles and descriptions
 - [ ] Animated searching status with live count; rows accumulate per query stage
 - [ ] Download options button per row opens scrollable popup with all files grouped (main formats + more files); borrow/pay rows show access note instead
+- [ ] Brand Find For Free; category selector Books/Video/Anime/Music with per-category mediatype, placeholders, ?cat= restore

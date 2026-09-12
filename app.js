@@ -92,16 +92,26 @@ function cacheSet(k, d) {
   } catch {}
 }
 
-function buildQueries(raw) {
+const CATS = {
+  books: { media: 'texts', extra: '', ph: 'Title — e.g. High Output Management' },
+  video: { media: 'movies', extra: '', ph: 'Film title — e.g. Night of the Living Dead' },
+  anime: { media: 'movies', extra: ' AND anime', ph: 'Anime title…' },
+  music: { media: 'audio', extra: '', ph: 'Artist or track — e.g. Beethoven' },
+};
+let cat = 'books';
+
+function buildQueries(raw, c) {
+  const mt = 'mediatype:' + (CATS[c] ? CATS[c].media : 'texts');
+  const ex = (CATS[c] && CATS[c].extra) || '';
   const w = words(raw);
   const quoted = luc(raw).slice(0, 120);
   const qs = [];
-  if (w.length >= 2) qs.push('mediatype:texts AND title:("' + quoted + '")');
+  if (w.length >= 2) qs.push(mt + ' AND title:("' + quoted + '")' + ex);
   if (w.length) {
     const tw = w.slice(0, 6).map(x => x).join(' AND ');
-    qs.push('mediatype:texts AND title:(' + tw + ')');
+    qs.push(mt + ' AND title:(' + tw + ')' + ex);
   }
-  qs.push('mediatype:texts AND (' + w.slice(0, 8).join(' AND ') + ')');
+  qs.push(mt + ' AND (' + w.slice(0, 8).join(' AND ') + ')' + ex);
   return qs.slice(0, 3);
 }
 
@@ -115,6 +125,8 @@ async function fetchSearch(q, signal) {
   params.append('fl[]', 'year');
   params.append('fl[]', 'description');
   params.append('fl[]', 'imagecount');
+  params.append('fl[]', 'runtime');
+  params.append('fl[]', 'duration');
   params.append('fl[]', 'access-restricted-item');
   params.append('fl[]', 'collection');
   params.append('fl[]', 'language');
@@ -262,6 +274,8 @@ async function olEnrich(docs, raw, signal) {
   } catch {}
 }
 
+function one(v) { return Array.isArray(v) ? v[0] : v; }
+
 function creatorText(d) {
   if (Array.isArray(d.creator)) return d.creator.slice(0, 3).join(', ');
   return d.creator || d._by || '';
@@ -277,7 +291,7 @@ function fmtSize(n) {
 }
 
 function pickDownloads(files) {
-  const ext = { '.pdf': 'PDF', '.epub': 'EPUB', '.mobi': 'Kindle', '.azw': 'Kindle', '.djvu': 'DjVu', '.txt': 'Plain text', '.torrent': 'Torrent' };
+  const ext = { '.pdf': 'PDF', '.epub': 'EPUB', '.mobi': 'Kindle', '.azw': 'Kindle', '.djvu': 'DjVu', '.txt': 'Plain text', '.torrent': 'Torrent', '.mp4': 'Video', '.ogv': 'Video', '.webm': 'Video', '.mp3': 'Audio', '.ogg': 'Audio', '.flac': 'Audio', '.m4a': 'Audio' };
   const main = [], more = [];
   for (const f of (files || [])) {
     const name = String(f.name || '');
@@ -431,7 +445,7 @@ function render(list) {
       '<h2>' + hi(r.title) + '</h2>' +
       '<p class="byline">' + esc([by, yr].filter(Boolean).join(' · ')) + '</p>' +
       '<div class="badges">' +
-      (r.pages != null ? '<span class="stamp pages">' + (r.print ? '≈' + r.pages + ' print ed.' : r.pages + ' scans') + '</span>' : '') +
+      (r.pages != null ? '<span class="stamp pages">' + (r.print ? '≈' + r.pages + ' print ed.' : r.pages + ' scans') + '</span>' : (one(d.runtime) || one(d.duration) ? '<span class="stamp pages">' + esc(String(one(d.runtime) || one(d.duration)).slice(0, 16)) + '</span>' : '')) +
       '<span class="stamp ' + r.access.cls + '">' + esc(r.access.label) + '</span>' +
       (r.mismatch ? '<span class="stamp mismatch">possible mismatch</span>' : '') +
       '</div>' +
@@ -487,13 +501,13 @@ async function enrichCounts(ranked, key, my) {
 async function runSearch(raw, opts) {
   const query = raw.trim();
   if (query.length < 4) {
-    statusEl.textContent = query.length < 2 ? 'Type a book title to search Internet Archive.' : 'Keep typing…';
+    statusEl.textContent = query.length < 2 ? 'Type a title to search free media.' : 'Keep typing…';
     if (!query) resultsEl.innerHTML = '';
     stopAnimate();
     document.body.classList.remove('searched');
     return;
   }
-  const key = norm(query);
+  const key = cat + ':' + norm(query);
   const hit = cacheGet(key);
   document.body.classList.toggle('searched', query.length >= 4);
   lastWords = sig(words(query));
@@ -504,15 +518,15 @@ async function runSearch(raw, opts) {
   if (hit) {
     statusEl.textContent = '';
     render(sortDocs(hit));
-    enrichCounts(hit, key, my).catch(() => {});
+    if (cat === 'books') enrichCounts(hit, key, my).catch(() => {});
     if (opts && opts.fromCache) return;
   } else {
     resultsEl.innerHTML = '';
   }
   liveCount = 0;
-  animateStatus('Searching Internet Archive');
+  animateStatus(cat === 'books' ? 'Searching Internet Archive' : 'Searching ' + cat);
   try {
-    const queries = buildQueries(query);
+    const queries = buildQueries(query, cat);
     let docs = [];
     for (const qq of queries) {
       const got = await fetchSearch(qq, ctl.signal);
@@ -525,7 +539,7 @@ async function runSearch(raw, opts) {
       }
       if (docs.length >= 12) break;
     }
-    await olEnrich(docs, query, ctl.signal);
+    if (cat === 'books') await olEnrich(docs, query, ctl.signal);
     if (my !== runSeq) return;
     const ranked = rankResults(docs, query).slice(0, 20);
     cacheSet(key, ranked);
@@ -533,7 +547,7 @@ async function runSearch(raw, opts) {
     stopAnimate();
     statusEl.textContent = '';
     render(sortDocs(ranked));
-    enrichCounts(ranked, key, my).catch(() => {});
+    if (cat === 'books') enrichCounts(ranked, key, my).catch(() => {});
   } catch (e) {
     if (e && e.name === 'AbortError') return;
     stopAnimate();
@@ -551,6 +565,7 @@ function syncUrl(v) {
   const url = new URL(location.href);
   if (norm(v).length >= 4) url.searchParams.set('q', v.trim());
   else url.searchParams.delete('q');
+  url.searchParams.set('cat', cat);
   history.replaceState(null, '', url.toString());
 }
 
@@ -575,6 +590,14 @@ resultsEl.addEventListener('click', (e) => {
   if (b) openDownloads(b.getAttribute('data-dl'), b.getAttribute('data-title') || '', b.getAttribute('data-kind') || 'unknown');
 });
 
+document.getElementById('cat').addEventListener('change', (e) => {
+  cat = CATS[e.target.value] ? e.target.value : 'books';
+  qEl.placeholder = CATS[cat].ph;
+  clearTimeout(debounceT);
+  syncUrl(qEl.value);
+  if (qEl.value.trim().length >= 4) runSearch(qEl.value);
+});
+
 document.addEventListener('click', (e) => {
   const t = e.target.closest('[data-try]');
   if (!t) return;
@@ -586,12 +609,19 @@ document.addEventListener('click', (e) => {
 });
 
 (function init() {
-  const p = new URLSearchParams(location.search).get('q');
+  const sp = new URLSearchParams(location.search);
+  const p = sp.get('q');
+  const c = sp.get('cat');
+  if (c && CATS[c]) {
+    cat = c;
+    document.getElementById('cat').value = c;
+    qEl.placeholder = CATS[c].ph;
+  }
   if (p && p.trim()) {
     qEl.value = p;
     runSearch(p);
   } else {
-    statusEl.textContent = 'Type a book title to search Internet Archive.';
+    statusEl.textContent = 'Type a title to search free media.';
   }
   const m = (location.hash || '').match(/^#download-(.+)$/);
   if (m) openDownloads(decodeURIComponent(m[1]), decodeURIComponent(m[1]), 'unknown');
