@@ -8,6 +8,37 @@ let runSeq = 0;
 let animT = 0;
 let liveCount = 0;
 
+// Issue tracking (Sentry, free tier, email-only signup). Activate: paste your
+// public DSN below. Until then this block does nothing and loads nothing.
+// Privacy: query text is stripped before sending; only error + page path go out.
+const SENTRY_DSN = '';
+(function initErrors() {
+  if (!SENTRY_DSN) return;
+  const s = document.createElement('script');
+  s.src = 'https://browser.sentry-cdn.com/8.38.0/bundle.min.js';
+  s.crossOrigin = 'anonymous';
+  s.onload = () => {
+    try {
+      Sentry.init({
+        dsn: SENTRY_DSN,
+        tracesSampleRate: 0,
+        beforeSend(ev) {
+          try {
+            ev.request = ev.request || {};
+            ev.request.url = location.pathname;
+            if (ev.breadcrumbs) ev.breadcrumbs = ev.breadcrumbs.map(b => {
+              if (b.data && b.data.url) b.data.url = String(b.data.url).split('?')[0];
+              return b;
+            });
+          } catch {}
+          return ev;
+        },
+      });
+    } catch {}
+  };
+  document.head.appendChild(s);
+})();
+
 function animateStatus(base) {
   clearInterval(animT);
   let n = 0;
@@ -111,6 +142,9 @@ function sig(ws) { return ws.filter(w => w.length > 2 && !STOP.has(w)); }
 function baseOf(t) {
   return norm(t).split(' - ')[0].split(' : ')[0].split(' (')[0].split(' / ')[0].trim();
 }
+function noArt(s) {
+  return String(s || '').replace(/^(the|a|an)\s+/i, '');
+}
 
 function rankResults(docs, raw) {
   const qw = words(raw);
@@ -183,6 +217,24 @@ function stars(avg) {
   return '★'.repeat(f) + '☆'.repeat(5 - f);
 }
 
+function subsetWork(title, creator, works) {
+  const tw = new Set(sig(words(baseOf(title))));
+  if (tw.size < 2) return null;
+  const cnorm = norm(creatorText({ creator }) || '');
+  for (const o of works) {
+    const ow = new Set(sig(words(baseOf(o.title || ''))));
+    if (ow.size < 2) continue;
+    const [small, big] = tw.size <= ow.size ? [tw, ow] : [ow, tw];
+    let ok = true;
+    for (const w of small) if (!big.has(w)) { ok = false; break; }
+    if (!ok) continue;
+    const extra = [...big].filter(w => !small.has(w));
+    const authors = norm(((o.author_name || []).join(' ')) + ' ' + cnorm);
+    if (extra.every(w => authors.includes(w))) return o;
+  }
+  return null;
+}
+
 async function olEnrich(docs, raw, signal) {
   try {
     const u = 'https://openlibrary.org/search.json?q=' + encodeURIComponent(raw) +
@@ -194,9 +246,12 @@ async function olEnrich(docs, raw, signal) {
     for (const o of (j.docs || [])) {
       const k = norm(o.title);
       if (k && !byTitle.has(k)) byTitle.set(k, o);
+      const ks = noArt(k);
+      if (ks && !byTitle.has(ks)) byTitle.set(ks, o);
     }
     for (const d of docs) {
-      const o = byTitle.get(norm(d.title || '')) || byTitle.get(baseOf(d.title || ''));
+      const t = norm(d.title || '');
+      const o = byTitle.get(t) || byTitle.get(noArt(t)) || byTitle.get(baseOf(d.title || '')) || byTitle.get(noArt(baseOf(d.title || ''))) || subsetWork(d.title || '', d.creator || '', j.docs || []);
       if (!o) continue;
       if (o.number_of_pages_median) d._med = Number(o.number_of_pages_median);
       if (o.ratings_average) { d._avg = Number(o.ratings_average); d._cnt = Number(o.ratings_count || 0); }
@@ -368,6 +423,7 @@ function render(list) {
     const desc = String(d.description || '').slice(0, 280);
     const row = document.createElement('article');
     row.className = 'row';
+    row.dataset.id = id;
     row.innerHTML =
       '<span class="idx">' + (i + 1) + '</span>' +
       '<img class="cover" loading="lazy" alt="" src="https://archive.org/services/img/' + encodeURIComponent(id) + '">' +
@@ -375,7 +431,7 @@ function render(list) {
       '<h2>' + hi(r.title) + '</h2>' +
       '<p class="byline">' + esc([by, yr].filter(Boolean).join(' · ')) + '</p>' +
       '<div class="badges">' +
-      (r.pages != null ? '<span class="stamp pages">' + (r.print ? '≈' + r.pages + ' print ed.' : r.pages + ' scans') + '</span>' : '<span class="stamp pages">pages n/a</span>') +
+      (r.pages != null ? '<span class="stamp pages">' + (r.print ? '≈' + r.pages + ' print ed.' : r.pages + ' scans') + '</span>' : '') +
       '<span class="stamp ' + r.access.cls + '">' + esc(r.access.label) + '</span>' +
       (r.mismatch ? '<span class="stamp mismatch">possible mismatch</span>' : '') +
       '</div>' +
@@ -388,6 +444,44 @@ function render(list) {
     img.onerror = () => { img.style.visibility = 'hidden'; };
     resultsEl.appendChild(row);
   });
+}
+
+function pageBadgeText(r) {
+  if (r.pages == null) return null;
+  return r.print ? '≈' + r.pages + ' print ed.' : r.pages + ' scans';
+}
+
+async function enrichCounts(ranked, key, my) {
+  const missing = ranked.filter(r => r.pages == null);
+  if (!missing.length) return;
+  await Promise.allSettled(missing.map(async (r) => {
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 6000);
+      const resp = await fetch('https://archive.org/metadata/' + encodeURIComponent(r.doc.identifier), { signal: ctl.signal });
+      clearTimeout(t);
+      if (!resp.ok) return;
+      const j = await resp.json();
+      const ic = j && j.metadata && j.metadata.imagecount;
+      if (!ic || my !== runSeq) return;
+      r.doc.imagecount = ic;
+      r.pages = Number(ic);
+      r.print = false;
+      const el = resultsEl.querySelector('[data-id="' + CSS.escape(r.doc.identifier) + '"] .stamp.pages');
+      if (el) el.textContent = pageBadgeText(r);
+      else {
+        const badges = resultsEl.querySelector('[data-id="' + CSS.escape(r.doc.identifier) + '"] .badges');
+        if (badges) {
+          const s = document.createElement('span');
+          s.className = 'stamp pages';
+          s.textContent = pageBadgeText(r);
+          badges.prepend(s);
+        }
+      }
+    } catch {}
+  }));
+  if (my !== runSeq) return;
+  cacheSet(key, ranked);
 }
 
 async function runSearch(raw, opts) {
@@ -404,16 +498,17 @@ async function runSearch(raw, opts) {
   document.body.classList.toggle('searched', query.length >= 4);
   lastWords = sig(words(query));
   stopAnimate();
+  if (ctl) ctl.abort();
+  ctl = new AbortController();
+  const my = ++runSeq;
   if (hit) {
-    statusEl.textContent = hit.length + (hit.length === 1 ? ' book' : ' books') + ' (cached)';
+    statusEl.textContent = '';
     render(sortDocs(hit));
+    enrichCounts(hit, key, my).catch(() => {});
     if (opts && opts.fromCache) return;
   } else {
     resultsEl.innerHTML = '';
   }
-  if (ctl) ctl.abort();
-  ctl = new AbortController();
-  const my = ++runSeq;
   liveCount = 0;
   animateStatus('Searching Internet Archive');
   try {
@@ -436,14 +531,15 @@ async function runSearch(raw, opts) {
     cacheSet(key, ranked);
     if (norm(qEl.value) !== key) return;
     stopAnimate();
-    statusEl.textContent = ranked.length + (ranked.length === 1 ? ' book' : ' books') + ' found';
+    statusEl.textContent = '';
     render(sortDocs(ranked));
+    enrichCounts(ranked, key, my).catch(() => {});
   } catch (e) {
     if (e && e.name === 'AbortError') return;
     stopAnimate();
     const stale = cacheGet(key);
     if (stale) {
-      statusEl.textContent = stale.length + ' books found (cached)';
+      statusEl.textContent = '';
       render(stale);
     } else {
       statusEl.textContent = 'Archive.org unreachable right now — try again.';
