@@ -1,0 +1,16 @@
+# Criteria: BookLibrary frontend-only (no backend)
+
+- [ ] Type query → first cards <1.5s; repeat search instant from cache
+- [ ] Full "title + author" falls back, never zero when IA has it
+- [ ] Exact-title uploads never flagged mismatch; junk demoted last
+- [ ] Sort: mismatches bottom, then free → borrow → unknown → preview-only, then title-match score, then pages desc
+- [ ] `node --check app.js` passes
+- [ ] No fetch to /api/*, no Playwright, works as static files on Cloudflare Pages
+- [ ] Each row: cover left; title, creator·year, description, full clickable archive.org URL, pages badge
+- [ ] Access stamp per row from collections: Free to read / Borrow free / Preview only / Restricted
+- [ ] Ratings row (OL average + count + want/read) with zero extra IA requests
+- [ ] `?q=` in URL restores search on load
+- [ ] Sort control (Smart / title / pages / free) re-orders without refetch
+- [ ] Query words highlighted in titles and descriptions
+- [ ] Suggestion chips on hero and empty state; sticky ad rails both sides ≥1300px
+- [ ] Download options button per row opens scrollable popup with all files grouped (main formats + more files); borrow/pay rows show access note instead
