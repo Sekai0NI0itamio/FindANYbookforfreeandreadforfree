@@ -234,6 +234,7 @@ const SERVICES = {
       ['Plex', 'https://watch.plex.tv'],
       ['Vudu Free', 'https://www.vudu.com'],
       ['Crackle', 'https://www.crackle.com'],
+      ['Bilibili', 'https://www.bilibili.tv/en/anime'],
     ],
     card: [
       ['Kanopy', 'https://www.kanopy.com'],
@@ -247,6 +248,7 @@ const SERVICES = {
       ['Ani-One Asia (official licensor)', 'https://www.youtube.com/@AniOneAsia'],
       ['Ani-One India', 'https://www.youtube.com/@AniOneIndia'],
       ['AnimeLog', 'https://www.youtube.com/@AnimeLog'],
+      ['Bilibili (official anime)', 'https://www.bilibili.tv/en/anime'],
       ['Tubi Anime', 'https://tubitv.com/category/anime'],
       ['Pluto TV Anime', 'https://pluto.tv/live-tv/pluto-tv-anime'],
       ['RetroCrush', 'https://www.retrocrush.tv'],
