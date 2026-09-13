@@ -49,6 +49,7 @@ body.searched #brand{text-align:left;display:flex;align-items:center;gap:14px;ma
 .stamp.unknown{color:var(--muted)}
 .stamp.pages{color:var(--ink);border-style:dashed;font-weight:400}
 .stamp.mismatch{color:var(--red);border-style:dotted}
+.stamp.src{color:var(--muted);border-style:solid;font-weight:400}
 .desc{font-size:14.5px;line-height:1.65;color:#3d3423;margin:9px 0;overflow-wrap:anywhere}
 .desc button{background:none;border:none;color:var(--amber);cursor:pointer;font-size:13px;padding:0}
 .meta{font-size:13px;color:var(--muted);margin:7px 0}

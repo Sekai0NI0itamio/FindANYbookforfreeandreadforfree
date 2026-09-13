@@ -93,25 +93,25 @@ function cacheSet(k, d) {
 }
 
 const CATS = {
-  books: { media: 'texts', extra: '', ph: 'Title — e.g. High Output Management' },
-  video: { media: 'movies', extra: '', ph: 'Film title — e.g. Night of the Living Dead' },
-  anime: { media: 'movies', extra: ' AND anime', ph: 'Anime title…' },
-  music: { media: 'audio', extra: '', ph: 'Artist or track — e.g. Beethoven' },
+  books: { media: 'texts', coll: '', ph: 'Title — e.g. High Output Management' },
+  video: { media: 'movies', coll: '(collection:feature_films OR collection:moviesandfilms)', ph: 'Film title — e.g. Night of the Living Dead' },
+  anime: { media: 'movies', coll: 'collection:animationandcartoons', ph: 'Animated title…' },
+  music: { media: 'audio', coll: '', ph: 'Artist or track — e.g. Beethoven' },
 };
 let cat = 'books';
 
 function buildQueries(raw, c) {
-  const mt = 'mediatype:' + (CATS[c] ? CATS[c].media : 'texts');
-  const ex = (CATS[c] && CATS[c].extra) || '';
+  const cfg = CATS[c] || CATS.books;
+  const base = 'mediatype:' + cfg.media + (cfg.coll ? ' AND (' + cfg.coll + ')' : '');
   const w = words(raw);
   const quoted = luc(raw).slice(0, 120);
   const qs = [];
-  if (w.length >= 2) qs.push(mt + ' AND title:("' + quoted + '")' + ex);
+  if (w.length >= 2) qs.push(base + ' AND title:("' + quoted + '")');
   if (w.length) {
     const tw = w.slice(0, 6).map(x => x).join(' AND ');
-    qs.push(mt + ' AND title:(' + tw + ')' + ex);
+    qs.push(base + ' AND title:(' + tw + ')');
   }
-  qs.push(mt + ' AND (' + w.slice(0, 8).join(' AND ') + ')' + ex);
+  qs.push(base + ' AND (' + w.slice(0, 8).join(' AND ') + ')');
   return qs.slice(0, 3);
 }
 
@@ -193,7 +193,7 @@ function rankResults(docs, raw) {
     const flag = d['access-restricted-item'];
     const access = accessOf(d);
     const score = exact * 1000 + baseExact * 800 + recall * 200 + precision * 300 + authorHit * 150 + (pages != null ? Math.min(pages, 2000) / 100 : 0) + (d.description ? 5 : 0) - junk - mismatch * 500;
-    out.push({ doc: d, title, coverage, exact, mismatch, pages, print, access, score });
+    out.push({ doc: d, title, coverage, exact, mismatch, pages, print, access, score, src: 'Internet Archive', note: 'Stream or download', url: 'https://archive.org/details/' + id });
   }
   const tier = { free: 0, borrow: 1, unknown: 2, pay: 3 };
   out.sort((a, b) => {
@@ -204,6 +204,10 @@ function rankResults(docs, raw) {
     return (b.pages || 0) - (a.pages || 0);
   });
   return out;
+}
+
+function freeLabel() {
+  return cat === 'music' ? 'Free to listen' : (cat === 'video' || cat === 'anime' ? 'Free to watch' : 'Free to read');
 }
 
 function accessOf(doc) {
@@ -217,11 +221,22 @@ function accessOf(doc) {
     if (coll) return { kind: 'pay', label: 'Preview only — buy or borrow elsewhere', cls: 'pay' };
     return { kind: 'unknown', label: 'Restricted — check Archive for access', cls: 'unknown' };
   }
-  return { kind: 'free', label: 'Free to read', cls: 'ok' };
+  return { kind: 'free', label: freeLabel(), cls: 'ok' };
 }
 
 function esc(s) {
   return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function fixMojibake(s) {
+  s = String(s || '');
+  if (!/Ã.|â€|Â./.test(s)) return s;
+  try {
+    const bytes = Uint8Array.from(s, c => c.charCodeAt(0) & 0xff);
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return s;
+  }
 }
 
 function stars(avg) {
@@ -275,6 +290,80 @@ async function olEnrich(docs, raw, signal) {
 }
 
 function one(v) { return Array.isArray(v) ? v[0] : v; }
+
+function fmtDur(sec) {
+  sec = Math.round(Number(sec) || 0);
+  if (!sec) return '';
+  const m = Math.floor(sec / 60);
+  return m + ':' + String(sec % 60).padStart(2, '0');
+}
+
+// Legal free-music sources. Both send permissive CORS and need no API key.
+async function openverseAudio(q, signal) {
+  const r = await fetch('https://api.openverse.org/v1/audio/?q=' + encodeURIComponent(q) + '&page_size=20', { signal });
+  if (!r.ok) throw new Error('openverse ' + r.status);
+  const j = await r.json();
+  return (j.results || []).map(o => ({
+    identifier: 'ov-' + String(o.id || '').slice(0, 10),
+    title: o.title || 'Untitled',
+    creator: o.creator || '',
+    description: o.license ? 'License ' + String(o.license).toUpperCase() : '',
+    _src: 'Openverse',
+    _note: 'Creative Commons · download',
+    _url: o.foreign_landing_url || o.url,
+    _thumb: o.thumbnail || '',
+    _dur: fmtDur((Number(o.duration) || 0) / 1000),
+  }));
+}
+
+async function audiusTracks(q, signal) {
+  const r = await fetch('https://api.audius.co/v1/tracks/search?query=' + encodeURIComponent(q) + '&limit=20&app_name=findforfree', { signal });
+  if (!r.ok) throw new Error('audius ' + r.status);
+  const j = await r.json();
+  return (j.data || []).map(t => ({
+    identifier: 'au-' + String(t.id || '').slice(0, 10),
+    title: t.title || 'Untitled',
+    creator: (t.user && t.user.name) || '',
+    description: t.genre || '',
+    _src: 'Audius',
+    _note: 'Free streaming',
+    _url: t.permalink ? 'https://audius.co' + t.permalink : 'https://audius.co',
+    _thumb: (t.artwork && (t.artwork['150x150'] || t.artwork['480x480'])) || '',
+    _dur: fmtDur(t.duration),
+  }));
+}
+
+function otherSources(c, q, signal) {
+  if (c === 'music') {
+    return Promise.allSettled([openverseAudio(q, signal), audiusTracks(q, signal)])
+      .then(rs => rs.flatMap(r => (r.status === 'fulfilled' ? r.value : [])));
+  }
+  return Promise.resolve([]);
+}
+
+function extrasToRanked(items, query) {
+  const sq = new Set(sig(words(query)));
+  return items.map(d => {
+    const tw = new Set(sig(words(d.title)));
+    let hits = 0;
+    for (const w of sq) if (tw.has(w)) hits++;
+    const cov = sq.size ? hits / sq.size : 0;
+    return {
+      doc: d,
+      title: d.title,
+      score: cov * 400,
+      mismatch: false,
+      pages: null,
+      print: false,
+      access: { kind: 'free', label: 'Free to access', cls: 'ok' },
+      src: d._src,
+      note: d._note,
+      url: d._url,
+      thumb: d._thumb,
+      dur: d._dur,
+    };
+  });
+}
 
 function creatorText(d) {
   if (Array.isArray(d.creator)) return d.creator.slice(0, 3).join(', ');
@@ -425,34 +514,40 @@ function sortDocs(list) {
 function render(list) {
   resultsEl.innerHTML = '';
   if (!list.length) {
-    resultsEl.innerHTML = '<div class="empty">No matches on Internet Archive for that query.<br><span class="etips">Try fewer words, check spelling, or try one of these:</span></div><div id="tryempty">Try: <button data-try="High Output Management">High Output Management</button><button data-try="Lord of the Flies">Lord of the Flies</button><button data-try="Pride and Prejudice">Pride and Prejudice</button></div>';
+    resultsEl.innerHTML = '<div class="empty">No matches for that query.<br><span class="etips">Try fewer words, check spelling, or try one of these:</span></div><div id="tryempty">Try: <button data-try="High Output Management">High Output Management</button><button data-try="Lord of the Flies">Lord of the Flies</button><button data-try="Pride and Prejudice">Pride and Prejudice</button></div>';
     return;
   }
   list.forEach((r, i) => {
     const d = r.doc;
     const id = d.identifier;
-    const url = 'https://archive.org/details/' + id;
-    const by = creatorText(d);
+    const url = r.url || ('https://archive.org/details/' + id);
+    const thumb = r.thumb || ('https://archive.org/services/img/' + encodeURIComponent(id));
+    const by = fixMojibake(creatorText(d));
     const yr = yearText(d);
-    const desc = String(d.description || '').slice(0, 280);
+    const descRaw = fixMojibake(String(d.description || '')).replace(/\s+/g, ' ').trim();
+    const desc = descRaw.length > 6 ? descRaw.slice(0, 280) : '';
+    const dur = r.dur || one(d.runtime) || one(d.duration);
     const row = document.createElement('article');
     row.className = 'row';
     row.dataset.id = id;
     row.innerHTML =
       '<span class="idx">' + (i + 1) + '</span>' +
-      '<img class="cover" loading="lazy" alt="" src="https://archive.org/services/img/' + encodeURIComponent(id) + '">' +
+      '<img class="cover" loading="lazy" alt="" src="' + esc(thumb) + '">' +
       '<div class="main">' +
-      '<h2>' + hi(r.title) + '</h2>' +
+      '<h2>' + hi(fixMojibake(r.title)) + '</h2>' +
       '<p class="byline">' + esc([by, yr].filter(Boolean).join(' · ')) + '</p>' +
       '<div class="badges">' +
-      (r.pages != null ? '<span class="stamp pages">' + (r.print ? '≈' + r.pages + ' print ed.' : r.pages + ' scans') + '</span>' : (one(d.runtime) || one(d.duration) ? '<span class="stamp pages">' + esc(String(one(d.runtime) || one(d.duration)).slice(0, 16)) + '</span>' : '')) +
+      (r.pages != null ? '<span class="stamp pages">' + (r.print ? '≈' + r.pages + ' print ed.' : r.pages + ' scans') + '</span>' : (dur ? '<span class="stamp pages">' + esc(String(dur).slice(0, 16)) + '</span>' : '')) +
       '<span class="stamp ' + r.access.cls + '">' + esc(r.access.label) + '</span>' +
+      '<span class="stamp src">' + esc(r.src || 'Internet Archive') + '</span>' +
       (r.mismatch ? '<span class="stamp mismatch">possible mismatch</span>' : '') +
       '</div>' +
       (desc ? '<p class="desc">' + hi(desc) + '</p>' : '') +
       (d._avg ? '<p class="meta"><span class="stars">' + stars(d._avg) + '</span> ' + Number(d._avg).toFixed(1) + ' · ' + (d._cnt || 0) + ' ratings' + (d._want ? ' · want ' + d._want : '') + (d._read ? ' · read ' + d._read : '') + '</p>' : '') +
       '<p class="url"><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a></p>' +
-      '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + esc(r.title) + '">Download options</button></p>' +
+      (r.src === 'Internet Archive'
+        ? '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + esc(fixMojibake(r.title)) + '">Download options</button></p>'
+        : (r.note ? '<p class="dnote">' + esc(r.note) + '</p>' : '')) +
       '</div>';
     const img = row.querySelector('img');
     img.onerror = () => { img.style.visibility = 'hidden'; };
@@ -541,12 +636,23 @@ async function runSearch(raw, opts) {
     }
     if (cat === 'books') await olEnrich(docs, query, ctl.signal);
     if (my !== runSeq) return;
-    const ranked = rankResults(docs, query).slice(0, 20);
+    let combined = rankResults(docs, query).slice(0, 20);
+    if (cat === 'music') {
+      try {
+        const ex = await otherSources(cat, query, ctl.signal);
+        if (my !== runSeq) return;
+        const iaTop = combined.slice(0, 12);
+        const ov = extrasToRanked(ex.filter(x => x._src === 'Openverse'), query).slice(0, 6);
+        const au = extrasToRanked(ex.filter(x => x._src === 'Audius'), query).slice(0, 6);
+        combined = iaTop.concat(ov, au);
+      } catch {}
+    }
+    const ranked = sortDocs(combined).slice(0, 20);
     cacheSet(key, ranked);
-    if (norm(qEl.value) !== key) return;
+    if (norm(qEl.value) !== norm(query)) return;
     stopAnimate();
     statusEl.textContent = '';
-    render(sortDocs(ranked));
+    render(ranked);
     if (cat === 'books') enrichCounts(ranked, key, my).catch(() => {});
   } catch (e) {
     if (e && e.name === 'AbortError') return;
