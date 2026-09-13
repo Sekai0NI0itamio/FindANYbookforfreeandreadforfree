@@ -68,6 +68,10 @@ body.searched #brand{text-align:left;display:flex;align-items:center;gap:14px;ma
 .dl{margin:10px 0 2px}
 .dl button{background:transparent;border:1.5px solid var(--amber);border-radius:3px;padding:5px 14px;color:var(--amber);font-size:13px;font-weight:600;cursor:pointer}
 .dl button:hover{background:var(--amber);color:var(--card)}
+.action-link{display:inline-block;border:1.5px solid var(--oxblood);border-radius:3px;padding:4px 12px;color:var(--oxblood);font-size:13px;font-weight:600;text-decoration:none;margin:4px 0;transition:all .15s}
+.action-link:hover{background:var(--oxblood);color:#fff}
+.action-read{border-color:var(--green);color:var(--green)}
+.action-read:hover{background:var(--green);color:#fff}
 #aud{display:block;width:100%;margin:10px 0 2px;height:34px}
 #dlov{position:fixed;inset:0;background:rgba(43,36,23,.45);display:flex;align-items:center;justify-content:center;padding:24px 16px;z-index:50;overflow-y:auto}
 #dlov .dlg{margin:auto}

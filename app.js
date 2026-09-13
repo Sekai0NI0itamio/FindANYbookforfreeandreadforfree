@@ -1013,13 +1013,68 @@ async function playAudio(ref, title) {
   }
 }
 
-function playBtn(r) {
-  if (cat !== 'music') return '';
+// Unified action buttons for ALL categories — play, read, watch, download.
+// Each result's identifier prefix tells us the source and available actions.
+function actionBtns(r) {
+  const id = String((r.doc && r.doc.identifier) || '');
   const t = esc(String(r.title || '').slice(0, 80));
-  if (r.doc && r.doc._preview) return '<p class="dl"><button data-play="pv:' + esc(encodeURIComponent(r.doc._preview)) + '" data-title="' + t + '">▶ Preview</button></p>';
-  if (r.au) return '<p class="dl"><button data-play="au:' + esc(String(r.au)) + '" data-title="' + t + '">▶ Play</button></p>';
-  if (r.ia) return '<p class="dl"><button data-play="ia:' + esc(r.doc.identifier) + '" data-title="' + t + '">▶ Play</button></p>';
-  return '';
+  const url = r.url || '';
+  let html = '';
+
+  // --- Music: play / preview / download ---
+  if (cat === 'music') {
+    if (r.doc && r.doc._preview) {
+      html += '<p class="dl"><button data-play="pv:' + esc(encodeURIComponent(r.doc._preview)) + '" data-title="' + t + '">▶ Preview (30s)</button></p>';
+    }
+    if (r.au) {
+      html += '<p class="dl"><button data-play="au:' + esc(String(r.au)) + '" data-title="' + t + '">▶ Play full track</button></p>';
+    }
+    if (r.ia) {
+      html += '<p class="dl"><button data-play="ia:' + esc(id) + '" data-title="' + t + '">▶ Play</button></p>';
+      html += '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + t + '">Download audio</button></p>';
+    }
+    if (id.startsWith('it-') && url) {
+      html += '<p class="dl"><a href="' + esc(url) + '" target="_blank" rel="noopener" class="action-link">Open in Apple Music</a></p>';
+    }
+    if (id.startsWith('au-') && url) {
+      html += '<p class="dl"><a href="' + esc(url) + '" target="_blank" rel="noopener" class="action-link">Open in Audius</a></p>';
+    }
+    if (id.startsWith('mb-') && url) {
+      html += '<p class="dl"><a href="' + esc(url) + '" target="_blank" rel="noopener" class="action-link">View on MusicBrainz</a></p>';
+    }
+  }
+
+  // --- Books: read / borrow / download ---
+  if (cat === 'books') {
+    if (id.startsWith('gx-')) {
+      const gid = id.replace('gx-', '');
+      html += '<p class="dl"><a href="https://www.gutenberg.org/ebooks/' + esc(gid) + '" target="_blank" rel="noopener" class="action-link action-read">Read free (Gutenberg)</a></p>';
+      html += '<p class="dl"><a href="https://www.gutenberg.org/ebooks/' + esc(gid) + '.epub.noimages" target="_blank" rel="noopener" class="action-link">Download EPUB</a></p>';
+      html += '<p class="dl"><a href="https://www.gutenberg.org/ebooks/' + esc(gid) + '.txt.utf-8" target="_blank" rel="noopener" class="action-link">Download plain text</a></p>';
+    }
+    if (id.startsWith('ol-') && url) {
+      html += '<p class="dl"><a href="' + esc(url) + '" target="_blank" rel="noopener" class="action-link action-read">Borrow free (Open Library)</a></p>';
+    }
+    if (id.startsWith('gb-') && url) {
+      html += '<p class="dl"><a href="' + esc(url) + '" target="_blank" rel="noopener" class="action-link">Preview (Google Books)</a></p>';
+    }
+    if (r.ia) {
+      html += '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + t + '">Download options</button></p>';
+    }
+  }
+
+  // --- Video / Anime: watch / trailer ---
+  if (cat === 'video' || cat === 'anime') {
+    if (r.ia) {
+      html += '<p class="dl"><button data-play="ia:' + esc(id) + '" data-title="' + t + '">▶ Watch</button></p>';
+      html += '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + t + '">Download video</button></p>';
+    }
+    if (url) {
+      html += '<p class="dl"><a href="' + esc(url) + '" target="_blank" rel="noopener" class="action-link">View details</a></p>';
+    }
+  }
+
+  return html;
 }
 
 function render(list) {
@@ -1066,10 +1121,7 @@ function render(list) {
       '<p class="url"><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a></p>' +
       ((cat === 'video' || cat === 'anime' || cat === 'books' || cat === 'music') ? pirateLinks(r.title) : '') +
       ((cat === 'video' || cat === 'anime') ? provLinks(r.title) : '') +
-      (r.ia
-        ? '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + esc(fixMojibake(r.title)) + '">Download options</button></p>'
-        : '') +
-      playBtn(r) +
+      actionBtns(r) +
       (r.note ? '<p class="dnote">' + esc(r.note) + '</p>' : '') +
       '</div>';
     const img = row.querySelector('img');
