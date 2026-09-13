@@ -3,6 +3,7 @@
 // NEVER sent to the browser. Deployed automatically with the site.
 // Routed at /api/youtube?q=...
 export async function onRequestGet({ request, env }) {
+  if (!fromOurSite(request)) return forbidden();
   const q = new URL(request.url).searchParams.get('q') || '';
   const key = env.YOUTUBE_KEY;
   if (!key) return json({ configured: false, items: [] });
@@ -18,6 +19,26 @@ export async function onRequestGet({ request, env }) {
   } catch {
     return json({ configured: true, items: [] });
   }
+}
+
+// Only serve requests that originate from this site, so nobody can embed our
+// proxy elsewhere and burn the API quota. Origin is absent on direct browser
+// navigation; Referer covers same-site page loads.
+function fromOurSite(request) {
+  const host = request.headers.get('Host') || '';
+  const origin = request.headers.get('Origin') || '';
+  const ref = request.headers.get('Referer') || '';
+  if (!host) return false;
+  if (origin) return origin.includes(host);
+  if (ref) return ref.includes(host);
+  return true;
+}
+
+function forbidden() {
+  return new Response(JSON.stringify({ error: 'forbidden' }), {
+    status: 403,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  });
 }
 
 function json(o) {

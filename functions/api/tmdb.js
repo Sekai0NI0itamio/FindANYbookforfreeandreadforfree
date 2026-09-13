@@ -4,6 +4,7 @@
 // Routed at /api/tmdb?action=search&kind=video|anime&q=...
 //        or /api/tmdb?action=providers&type=movie|tv&id=123
 export async function onRequestGet({ request, env }) {
+  if (!fromOurSite(request)) return forbidden();
   const p = new URL(request.url).searchParams;
   const key = env.TMDB_KEY;
   const region = env.TMDB_REGION || 'US';
@@ -47,6 +48,25 @@ export async function onRequestGet({ request, env }) {
     return json({ configured: true });
   }
   return json({ configured: true });
+}
+
+// Only serve requests that originate from this site, so nobody can embed our
+// proxy elsewhere and burn the API quota.
+function fromOurSite(request) {
+  const host = request.headers.get('Host') || '';
+  const origin = request.headers.get('Origin') || '';
+  const ref = request.headers.get('Referer') || '';
+  if (!host) return false;
+  if (origin) return origin.includes(host);
+  if (ref) return ref.includes(host);
+  return true;
+}
+
+function forbidden() {
+  return new Response(JSON.stringify({ error: 'forbidden' }), {
+    status: 403,
+    headers: { 'content-type': 'application/json; charset=utf-8' },
+  });
 }
 
 function json(o) {
