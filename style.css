@@ -72,6 +72,15 @@ body.searched #brand{text-align:left;display:flex;align-items:center;gap:14px;ma
 .action-link:hover{background:var(--oxblood);color:#fff}
 .action-read{border-color:var(--green);color:var(--green)}
 .action-read:hover{background:var(--green);color:#fff}
+
+/* Streaming episode links */
+.stream-eps{margin:8px 0;background:#f0f7ff;border:1px solid #c8ddf0;border-radius:4px;padding:10px 12px}
+.stream-title{font-size:13px;font-weight:700;color:#1a5276;margin:0 0 6px}
+.stream-ep{display:block;font-size:12.5px;color:#1a5276;text-decoration:none;padding:3px 0;border-bottom:1px dotted #d5e3f0;line-height:1.4}
+.stream-ep:last-child{border-bottom:none}
+.stream-ep:hover{color:var(--amber)}
+.ep-site{display:inline-block;background:#1a5276;color:#fff;font-size:10px;font-weight:700;padding:1px 5px;border-radius:2px;margin-right:4px;vertical-align:middle}
+.stream-more{display:block;font-size:11px;color:var(--muted);margin-top:4px}
 #aud{display:block;width:100%;margin:10px 0 2px;height:34px}
 #dlov{position:fixed;inset:0;background:rgba(43,36,23,.45);display:flex;align-items:center;justify-content:center;padding:24px 16px;z-index:50;overflow-y:auto}
 #dlov .dlg{margin:auto}

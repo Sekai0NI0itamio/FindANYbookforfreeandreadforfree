@@ -550,6 +550,45 @@ async function musicBrainzRecs(q, signal) {
   }));
 }
 
+// ---- Deezer: keyless music API with 30-sec previews ----
+async function deezerMusic(q, signal) {
+  const r = await fetch('https://api.deezer.com/search?q=' + encodeURIComponent(q) + '&limit=15', { signal });
+  if (!r.ok) throw new Error('deezer ' + r.status);
+  const j = await r.json();
+  return ((j.data || []).map(t => ({
+    identifier: 'dz-' + String(t.id || ''),
+    title: t.title || 'Untitled',
+    creator: (t.artist && t.artist.name) || '',
+    description: (t.album && t.album.title ? 'Album: ' + t.album.title : ''),
+    _src: 'Deezer',
+    _note: '30-sec preview · free',
+    _url: t.link || ('https://www.deezer.com/search/' + encodeURIComponent(q)),
+    _thumb: (t.album && t.album.cover_medium) || '',
+    _preview: t.preview || '',
+    _dur: fmtDur(30),
+  })));
+}
+
+// ---- SoundCloud: scrapable search for free tracks ----
+async function soundcloudTracks(q, signal) {
+  // SoundCloud's internal API for search suggestions
+  const r = await fetch('https://api-v2.soundcloud.com/search/tracks?q=' + encodeURIComponent(q) +
+    '&limit=10&client_id=iZIs9mchVcX5lhVRyQGGAYlNPVldzAoX', { signal });
+  if (!r.ok) throw new Error('soundcloud ' + r.status);
+  const j = await r.json();
+  return ((j.collection || []).map(t => ({
+    identifier: 'sc-' + String(t.id || ''),
+    title: t.title || 'Untitled',
+    creator: (t.user && t.user.username) || '',
+    description: t.genre || '',
+    _src: 'SoundCloud',
+    _note: 'Free streaming',
+    _url: t.permalink_url || ('https://soundcloud.com/search?q=' + encodeURIComponent(q)),
+    _thumb: (t.artwork_url || '').replace('-large', '-t300x300'),
+    _dur: fmtDur(Math.round((Number(t.duration) || 0) / 1000)),
+  })));
+}
+
 // ---- Anime: keyless metadata with real fuzzy search (fixes "crayon shin" = zero) ----
 async function jikanAnime(q, signal) {
   const r = await fetch('https://api.jikan.moe/v4/anime?q=' + encodeURIComponent(q) +
@@ -592,7 +631,7 @@ async function kitsuAnime(q, signal) {
 }
 
 async function anilistAnime(q, signal) {
-  const query = 'query($q:String){Page(perPage:8){media(search:$q,type:ANIME){id title{romaji english} description coverImage{medium large} siteUrl averageScore startDate{year} format}}}';
+  const query = 'query($q:String){Page(perPage:10){media(search:$q,type:ANIME){id title{romaji english} description coverImage{medium large} siteUrl averageScore startDate{year} format episodes streamingEpisodes{title thumbnail url site}}}';
   const r = await fetch('https://graphql.anilist.co', {
     method: 'POST',
     signal,
@@ -602,18 +641,27 @@ async function anilistAnime(q, signal) {
   if (!r.ok) throw new Error('anilist ' + r.status);
   const j = await r.json();
   const list = (j.data && j.data.Page && j.data.Page.media) || [];
-  return list.map(m => ({
-    identifier: 'al-' + String(m.id || '').slice(0, 10),
-    title: ((m.title || {}).english || (m.title || {}).romaji) || 'Untitled',
-    creator: '',
-    description: String((m.description || '').replace(/<[^>]+>/g, ' ')).slice(0, 280),
-    _src: 'AniList',
-    _note: (m.averageScore ? '★ ' + (Number(m.averageScore) / 20).toFixed(1) + ' · ' : '') +
-      (m.format || 'Anime') + ' · check free providers below',
-    _url: m.siteUrl || ('https://anilist.co/search/anime?search=' + encodeURIComponent(q)),
-    _thumb: (m.coverImage && (m.coverImage.large || m.coverImage.medium)) || '',
-    _year: String((m.startDate && m.startDate.year) || ''),
-  }));
+  return list.map(m => {
+    const eps = (m.streamingEpisodes || []).map(e => ({
+      title: e.title || '',
+      url: e.url || '',
+      site: e.site || '',
+      thumb: e.thumbnail || '',
+    }));
+    return {
+      identifier: 'al-' + String(m.id || '').slice(0, 10),
+      title: ((m.title || {}).english || (m.title || {}).romaji) || 'Untitled',
+      creator: '',
+      description: String((m.description || '').replace(/<[^>]+>/g, ' ')).slice(0, 280),
+      _src: 'AniList',
+      _note: (m.averageScore ? '★ ' + (Number(m.averageScore) / 20).toFixed(1) + ' · ' : '') +
+        (m.format || 'Anime') + (eps.length ? ' · ' + eps.length + ' eps on streaming' : ''),
+      _url: m.siteUrl || ('https://anilist.co/search/anime?search=' + encodeURIComponent(q)),
+      _thumb: (m.coverImage && (m.coverImage.large || m.coverImage.medium)) || '',
+      _year: String((m.startDate && m.startDate.year) || ''),
+      _episodes: eps,
+    };
+  });
 }
 
 // ---- Video: TVMaze (keyless, CORS) so licensed titles never return zero ----
@@ -722,8 +770,8 @@ async function liveMusic(q, signal) {
 function otherSources(c, q, signal) {
   const jobs = [];
   if (c === 'music') jobs.push(
-    itunesMusic(q, signal), audiusTracks(q, signal), liveMusic(q, signal),
-    musicBrainzRecs(q, signal), openverseAudio(q, signal),
+    itunesMusic(q, signal), audiusTracks(q, signal), deezerMusic(q, signal),
+    liveMusic(q, signal), musicBrainzRecs(q, signal), openverseAudio(q, signal),
   );
   else if (c === 'anime') jobs.push(
     kitsuAnime(q, signal), anilistAnime(q, signal), jikanAnime(q, signal),
@@ -1038,6 +1086,9 @@ function actionBtns(r) {
     if (id.startsWith('au-') && url) {
       html += '<p class="dl"><a href="' + esc(url) + '" target="_blank" rel="noopener" class="action-link">Open in Audius</a></p>';
     }
+    if (id.startsWith('dz-') && url) {
+      html += '<p class="dl"><a href="' + esc(url) + '" target="_blank" rel="noopener" class="action-link">Open in Deezer</a></p>';
+    }
     if (id.startsWith('mb-') && url) {
       html += '<p class="dl"><a href="' + esc(url) + '" target="_blank" rel="noopener" class="action-link">View on MusicBrainz</a></p>';
     }
@@ -1063,8 +1114,33 @@ function actionBtns(r) {
     }
   }
 
-  // --- Video / Anime: watch / trailer ---
-  if (cat === 'video' || cat === 'anime') {
+  // --- Anime: streaming episodes + watch ---
+  if (cat === 'anime') {
+    // AniList streaming episodes (Crunchyroll links)
+    const eps = (r.doc && r.doc._episodes) || [];
+    if (eps.length) {
+      html += '<div class="stream-eps"><p class="stream-title">▶ Watch episodes:</p>';
+      const shown = eps.slice(0, 12);
+      for (const e of shown) {
+        html += '<a href="' + esc(e.url) + '" target="_blank" rel="noopener" class="stream-ep">' +
+          '<span class="ep-site">' + esc(e.site) + '</span> ' + esc(e.title.slice(0, 60)) + '</a>';
+      }
+      if (eps.length > 12) {
+        html += '<span class="stream-more">+' + (eps.length - 12) + ' more episodes</span>';
+      }
+      html += '</div>';
+    }
+    if (r.ia) {
+      html += '<p class="dl"><button data-play="ia:' + esc(id) + '" data-title="' + t + '">▶ Watch</button></p>';
+      html += '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + t + '">Download video</button></p>';
+    }
+    if (url) {
+      html += '<p class="dl"><a href="' + esc(url) + '" target="_blank" rel="noopener" class="action-link">View details</a></p>';
+    }
+  }
+
+  // --- Video: watch / trailer ---
+  if (cat === 'video') {
     if (r.ia) {
       html += '<p class="dl"><button data-play="ia:' + esc(id) + '" data-title="' + t + '">▶ Watch</button></p>';
       html += '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + t + '">Download video</button></p>';
@@ -1227,6 +1303,7 @@ async function runSearch(raw, opts) {
           mixed = interleaveBy([
             top('Apple Music', 8),
             top('Audius', 8),
+            top('Deezer', 8),
             top('Openverse', 6),
             top('Live Music Archive', 6),
             top('MusicBrainz', 6),
