@@ -146,6 +146,7 @@ function isJunk(doc) {
   if (t.length < 3) return 80;
   if (/\.(pdf|epub|mobi|txt)$/.test(t)) return 120;
   if (/^(pdf|ocr|full text|scan|combined|collection|misc)/.test(t)) return 60;
+  if (/ringtones?|mobile tones?|sms tone|\.mp3 download/i.test(t)) return 160;
   if (/[_]{2,}|[a-z]+\d{4,}/.test(t) && t.split(' ').length < 3) return 70;
   return 0;
 }
@@ -411,6 +412,7 @@ async function audiusTracks(q, signal) {
     _url: t.permalink ? 'https://audius.co' + t.permalink : 'https://audius.co',
     _thumb: (t.artwork && (t.artwork['150x150'] || t.artwork['480x480'])) || '',
     _dur: fmtDur(t.duration),
+    _au: t.id,
   }));
 }
 
@@ -429,115 +431,22 @@ async function liveMusic(q, signal) {
   }));
 }
 
-// TMDB watch-provider data (powered by JustWatch) and the YouTube Data API are
-// reached through our own Cloudflare Pages Functions (/api/tmdb, /api/youtube),
-// so the API keys live server-side in encrypted environment variables and never
-// reach the browser. See functions/api/*.js. Without keys the site still works.
-const TMDB_IMG = 'https://image.tmdb.org/t/p/w200';
-let tmdbOff = false;
-
-async function apiGet(path, signal) {
-  try {
-    const r = await fetch(path, { signal });
-    if (!r.ok) return null;
-    return await r.json();
-  } catch { return null; }
+// Every source below is public, keyless and browser-callable. No API keys.
+function otherSources(c, q, signal) {
+  if (c !== 'music') return Promise.resolve([]);
+  return Promise.allSettled([openverseAudio(q, signal), audiusTracks(q, signal), liveMusic(q, signal)])
+    .then(rs => rs.flatMap(r => (r.status === 'fulfilled' ? r.value : [])));
 }
 
-async function tmdbSearch(q, kind, signal) {
-  if (tmdbOff) return [];
-  const j = await apiGet('/api/tmdb?action=search&kind=' + encodeURIComponent(kind) + '&q=' + encodeURIComponent(q), signal);
-  if (!j) return [];
-  if (j.configured === false) { tmdbOff = true; return []; }
+// Interleave by source so one catalogue can't dominate the top of the list —
+// the user sees a real mix of services (Audius, Openverse, LMA, Archive…).
+function interleaveBy(lists) {
   const out = [];
-  for (const m of (j.results || [])) {
-    const type = m._type === 'tv' ? 'tv' : 'movie';
-    out.push({
-      identifier: 'tmdb-' + type + '-' + m.id,
-      title: m.title || m.name || 'Untitled',
-      creator: '',
-      description: m.overview || '',
-      _src: 'TMDB',
-      _url: 'https://www.themoviedb.org/' + type + '/' + m.id,
-      _thumb: m.poster_path ? TMDB_IMG + m.poster_path : '',
-      _year: String(m.release_date || m.first_air_date || '').slice(0, 4),
-      _tmdb: { type, id: m.id },
-      _prov: null,
-    });
+  const max = Math.max(0, ...lists.map(l => l.length));
+  for (let i = 0; i < max; i++) {
+    for (const l of lists) if (l[i]) out.push(l[i]);
   }
   return out;
-}
-
-function providerOf(wp) {
-  if (!wp) return { ads: [], free: [], sub: [], rent: false, buy: false, link: '' };
-  return {
-    ads: (wp.ads || []).map(p => ({ name: p.provider_name })),
-    free: (wp.free || []).map(p => ({ name: p.provider_name })),
-    sub: (wp.flatrate || []).map(p => ({ name: p.provider_name })),
-    rent: !!(wp.rent && wp.rent.length),
-    buy: !!(wp.buy && wp.buy.length),
-    link: wp.link || '',
-  };
-}
-
-async function tmdbProviders(items, signal) {
-  await Promise.allSettled(items.map(async (it) => {
-    if (!it || !it._tmdb) return;
-    const j = await apiGet('/api/tmdb?action=providers&type=' + it._tmdb.type + '&id=' + encodeURIComponent(it._tmdb.id), signal);
-    it._prov = providerOf(j && j.providers);
-    if (it._prov && it._prov.link) it._url = it._prov.link;
-  }));
-}
-
-// Official YouTube search + embedded player. Calls our own /api/youtube proxy
-// (functions/api/youtube.js) so the API key stays server-side. Playback uses the
-// official embedded player — no downloading, no proxying. A link back to
-// YouTube is shown on every result, as their terms require.
-let ytOff = false;
-
-async function youtubeSearch(q, signal) {
-  if (ytOff) return [];
-  const j = await apiGet('/api/youtube?q=' + encodeURIComponent(q), signal);
-  if (!j) return [];
-  if (j.configured === false) { ytOff = true; return []; }
-  return (j.items || []).map(it => {
-    const s = it.snippet || {};
-    const th = (s.thumbnails && (s.thumbnails.medium || s.thumbnails.default)) || {};
-    return {
-      identifier: 'yt-' + it.id.videoId,
-      title: s.title || 'Untitled',
-      creator: s.channelTitle || '',
-      description: s.description || '',
-      _src: 'YouTube',
-      _note: '',
-      _url: 'https://www.youtube.com/watch?v=' + it.id.videoId,
-      _thumb: th.url || '',
-      _year: String(s.publishedAt || '').slice(0, 4),
-      _yt: it.id.videoId,
-    };
-  });
-}
-
-function openPlayer(videoId, title) {
-  const ov = dlShell(title || 'YouTube');
-  const body = ov.querySelector('.dbody');
-  ov.hidden = false;
-  document.body.style.overflow = 'hidden';
-  body.innerHTML =
-    '<div class="player"><iframe src="https://www.youtube-nocookie.com/embed/' + encodeURIComponent(videoId) +
-    '?autoplay=1&rel=0" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen title="Player"></iframe></div>' +
-    '<p class="dnote"><a href="https://www.youtube.com/watch?v=' + encodeURIComponent(videoId) +
-    '" target="_blank" rel="noopener">Open on YouTube</a> · video belongs to its creator · YouTube Terms of Service apply</p>';
-  body.querySelector('iframe').focus?.();
-}
-
-function otherSources(c, q, signal) {
-  const jobs = [];
-  if (c === 'music') jobs.push(openverseAudio(q, signal), audiusTracks(q, signal), liveMusic(q, signal));
-  if (c === 'video' || c === 'anime') jobs.push(tmdbSearch(q, c, signal));
-  if (c === 'video' || c === 'anime' || c === 'music') jobs.push(youtubeSearch(q, signal));
-  if (!jobs.length) return Promise.resolve([]);
-  return Promise.allSettled(jobs).then(rs => rs.flatMap(r => (r.status === 'fulfilled' ? r.value : [])));
 }
 
 function extrasToRanked(items, query) {
@@ -554,9 +463,7 @@ function extrasToRanked(items, query) {
       mismatch: false,
       pages: null,
       print: false,
-      access: d._tmdb
-        ? { kind: 'unknown', label: 'Where to watch', cls: 'unknown' }
-        : { kind: 'free', label: freeLabel(), cls: 'ok' },
+      access: { kind: 'free', label: freeLabel(), cls: 'ok' },
       src: d._src,
       note: d._note,
       ia: !!d._ia,
@@ -564,9 +471,7 @@ function extrasToRanked(items, query) {
       thumb: d._thumb,
       dur: d._dur,
       year: d._year,
-      tmdb: d._tmdb,
-      yt: d._yt,
-      prov: null,
+      au: d._au,
     };
   });
 }
@@ -735,35 +640,58 @@ function provLinks(title) {
     '<a href="' + esc(b + q) + '" target="_blank" rel="noopener">' + esc(n) + '</a>').join(' · ') + '</p>';
 }
 
-function provStamps(r) {
-  if (!r.tmdb) return '';
-  const p = r.prov;
-  if (!p) return '<span class="stamp prov unknown">checking providers…</span>';
-  const out = [];
-  for (const x of (p.ads || []).slice(0, 2)) out.push('<span class="stamp prov ok">' + esc(x.name) + ' · free with ads</span>');
-  for (const x of (p.free || []).slice(0, 2)) out.push('<span class="stamp prov ok">' + esc(x.name) + ' · free</span>');
-  if (!out.length) for (const x of (p.sub || []).slice(0, 2)) out.push('<span class="stamp prov pay">' + esc(x.name) + ' · subscription</span>');
-  if (!out.length) out.push('<span class="stamp prov ' + ((p.rent || p.buy) ? 'pay' : 'unknown') + '">' + ((p.rent || p.buy) ? 'Rent/buy only' : 'Not on free streaming') + '</span>');
-  return out.join('');
+// In-page audio playback. Audius streams full tracks; Archive items resolve to
+// their first playable file on click. Both are keyless and legal to stream.
+let audioEl = null;
+const auFileCache = new Map();
+
+function audio() {
+  if (!audioEl) {
+    audioEl = document.createElement('audio');
+    audioEl.id = 'aud';
+    audioEl.controls = true;
+    audioEl.preload = 'none';
+    audioEl.hidden = true;
+    document.body.appendChild(audioEl);
+  }
+  return audioEl;
 }
 
-async function enrichProviders(ranked, key, my) {
-  if (tmdbOff) return;
-  const items = ranked.filter(r => r.tmdb && !r.prov);
-  if (!items.length) return;
-  await tmdbProviders(items.map(r => r.doc), ctl && ctl.signal);
-  if (my !== runSeq) return;
-  for (const r of items) {
-    r.prov = (r.doc && r.doc._prov) || { ads: [], free: [], sub: [], rent: false, buy: false, link: '' };
-    if (r.doc && r.doc._url) r.url = r.doc._url;
-    const card = resultsEl.querySelector('[data-id="' + CSS.escape(r.doc.identifier) + '"]');
-    if (!card) continue;
-    const ph = card.querySelector('.stamp.prov');
-    if (ph) ph.outerHTML = provStamps(r);
-    const a = card.querySelector('.url a');
-    if (a && r.url) { a.href = r.url; a.textContent = r.url; }
+async function playAudio(ref, title) {
+  const [kind, val] = String(ref).split(':');
+  const el = audio();
+  if (kind === 'au') {
+    el.src = 'https://api.audius.co/v1/tracks/' + encodeURIComponent(val) + '/stream?app_name=findforfree';
+    el.hidden = false;
+    try { await el.play(); } catch {}
+    return;
   }
-  cacheSet(key, ranked);
+  if (kind === 'ia') {
+    statusEl.textContent = 'Loading audio…';
+    let file = auFileCache.get(val);
+    if (file === undefined) {
+      try {
+        const r = await fetch('https://archive.org/metadata/' + encodeURIComponent(val));
+        const j = await r.json();
+        const f = (j.files || []).find(x => /\.(mp3|ogg|m4a|flac)$/i.test(x.name || ''));
+        file = f ? f.name : '';
+      } catch { file = ''; }
+      auFileCache.set(val, file);
+    }
+    statusEl.textContent = '';
+    if (!file) { statusEl.textContent = 'No playable audio file on this item — try Download options.'; return; }
+    el.src = 'https://archive.org/download/' + encodeURIComponent(val) + '/' + encodeURIComponent(file);
+    el.hidden = false;
+    try { await el.play(); } catch {}
+  }
+}
+
+function playBtn(r) {
+  if (cat !== 'music') return '';
+  const t = esc(String(r.title || '').slice(0, 80));
+  if (r.au) return '<p class="dl"><button data-play="au:' + esc(String(r.au)) + '" data-title="' + t + '">▶ Play</button></p>';
+  if (r.ia) return '<p class="dl"><button data-play="ia:' + esc(r.doc.identifier) + '" data-title="' + t + '">▶ Play</button></p>';
+  return '';
 }
 
 function render(list) {
@@ -796,7 +724,6 @@ function render(list) {
       (r.pages != null ? '<span class="stamp pages">' + (r.print ? '≈' + r.pages + ' print ed.' : r.pages + ' scans') + '</span>' : (dur ? '<span class="stamp pages">' + esc(String(dur).slice(0, 16)) + '</span>' : '')) +
       '<span class="stamp ' + r.access.cls + '">' + esc(r.access.label) + '</span>' +
       '<span class="stamp src">' + esc(r.src || 'Internet Archive') + '</span>' +
-      provStamps(r) +
       (r.mismatch ? '<span class="stamp mismatch">possible mismatch</span>' : '') +
       '</div>' +
       (desc ? '<p class="desc">' + hi(desc) + '</p>' : '') +
@@ -805,9 +732,9 @@ function render(list) {
       ((cat === 'video' || cat === 'anime') ? provLinks(r.title) : '') +
       (r.ia
         ? '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + esc(fixMojibake(r.title)) + '">Download options</button></p>'
-        : (r.yt
-          ? '<p class="dl"><button data-yt="' + esc(r.yt) + '" data-title="' + esc(fixMojibake(r.title)) + '">▶ Watch here</button> <a class="ytt" href="' + esc(url) + '" target="_blank" rel="noopener">YouTube</a></p>'
-          : (r.note ? '<p class="dnote">' + esc(r.note) + '</p>' : ''))) +
+        : '') +
+      playBtn(r) +
+      (r.note ? '<p class="dnote">' + esc(r.note) + '</p>' : '') +
       '</div>';
     const img = row.querySelector('img');
     img.onerror = () => { img.style.visibility = 'hidden'; };
@@ -875,7 +802,6 @@ async function runSearch(raw, opts) {
     statusEl.textContent = '';
     render(sortDocs(hit));
     if (cat === 'books') enrichCounts(hit, key, my).catch(() => {});
-    if (cat === 'video' || cat === 'anime') enrichProviders(hit, key, my).catch(() => {});
     if (opts && opts.fromCache) return;
   } else {
     resultsEl.innerHTML = '';
@@ -899,32 +825,29 @@ async function runSearch(raw, opts) {
     if (cat === 'books') await olEnrich(docs, query, ctl.signal);
     if (my !== runSeq) return;
     let combined = rankResults(docs, query).slice(0, 20);
-    if (cat === 'music' || cat === 'video' || cat === 'anime') {
+    if (cat === 'music') {
       try {
-        const ex = await otherSources(cat, query, ctl.signal);
+        const ex = await otherSources('music', query, ctl.signal);
         if (my !== runSeq) return;
-        if (cat === 'music') {
-          const iaTop = combined.slice(0, 10);
-          const lma = extrasToRanked(ex.filter(x => x._src === 'Live Music Archive'), query).slice(0, 5);
-          const ov = extrasToRanked(ex.filter(x => x._src === 'Openverse'), query).slice(0, 3);
-          const au = extrasToRanked(ex.filter(x => x._src === 'Audius'), query).slice(0, 2);
-          const yt = extrasToRanked(ex.filter(x => x._src === 'YouTube'), query).slice(0, 3);
-          combined = iaTop.concat(lma, ov, au, yt);
-        } else {
-          const tm = extrasToRanked(ex.filter(x => x._src === 'TMDB'), query).slice(0, 10);
-          const yt = extrasToRanked(ex.filter(x => x._src === 'YouTube'), query).slice(0, 5);
-          combined = combined.slice(0, 12).concat(tm, yt);
-        }
+        const top = (src, n) => extrasToRanked(ex.filter(x => x._src === src), query)
+          .sort((a, b) => b.score - a.score).slice(0, n);
+        const mixed = interleaveBy([
+          top('Audius', 8),
+          top('Openverse', 6),
+          top('Live Music Archive', 6),
+          sortDocs(combined).slice(0, 8),
+        ]);
+        mixed.sort((a, b) => (a.mismatch ? 1 : 0) - (b.mismatch ? 1 : 0));
+        combined = mixed;
       } catch {}
     }
-    const ranked = sortDocs(combined).slice(0, 20);
+    const ranked = (cat === 'music' ? combined : sortDocs(combined)).slice(0, 20);
     cacheSet(key, ranked);
     if (norm(qEl.value) !== norm(query)) return;
     stopAnimate();
     statusEl.textContent = '';
     render(ranked);
     if (cat === 'books') enrichCounts(ranked, key, my).catch(() => {});
-    if (cat === 'video' || cat === 'anime') enrichProviders(ranked, key, my).catch(() => {});
   } catch (e) {
     if (e && e.name === 'AbortError') return;
     stopAnimate();
@@ -965,8 +888,8 @@ qEl.addEventListener('keydown', (e) => {
 resultsEl.addEventListener('click', (e) => {
   const b = e.target.closest('[data-dl]');
   if (b) { openDownloads(b.getAttribute('data-dl'), b.getAttribute('data-title') || '', b.getAttribute('data-kind') || 'unknown'); return; }
-  const v = e.target.closest('[data-yt]');
-  if (v) openPlayer(v.getAttribute('data-yt'), v.getAttribute('data-title') || '');
+  const p = e.target.closest('[data-play]');
+  if (p) playAudio(p.getAttribute('data-play'), p.getAttribute('data-title') || '');
 });
 
 document.getElementById('cat').addEventListener('change', (e) => {
