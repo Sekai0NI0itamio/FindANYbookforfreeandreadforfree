@@ -705,6 +705,7 @@ function yearText(d) {
 }
 
 let lastWords = [];
+let lastQuery = '';
 
 function hi(t) {
   let s = esc(t);
@@ -727,6 +728,23 @@ function sortDocs(list) {
     return (b.pages || 0) - (a.pages || 0);
   });
   return arr;
+}
+
+// Per-title deep links into each free provider's own search. Keyless, so every
+// result can hand the user a direct path to check each free service in turn.
+const FREE_SEARCH = [
+  ['Tubi', 'https://tubitv.com/search/'],
+  ['Pluto TV', 'https://pluto.tv/en/search?q='],
+  ['Roku', 'https://therokuchannel.roku.com/search/'],
+  ['iQIYI', 'https://www.iq.com/search?query='],
+  ['Bilibili', 'https://www.bilibili.tv/en/search?keyword='],
+  ['JustWatch', 'https://www.justwatch.com/us/search?q='],
+];
+
+function provLinks(title) {
+  const q = encodeURIComponent(String(title || '').slice(0, 70));
+  return '<p class="dnote">Find it free on: ' + FREE_SEARCH.map(([n, b]) =>
+    '<a href="' + esc(b + q) + '" target="_blank" rel="noopener">' + esc(n) + '</a>').join(' · ') + '</p>';
 }
 
 function provStamps(r) {
@@ -763,7 +781,8 @@ async function enrichProviders(ranked, key, my) {
 function render(list) {
   resultsEl.innerHTML = '';
   if (!list.length) {
-    resultsEl.innerHTML = '<div class="empty">No matches for that query.<br><span class="etips">Try fewer words, check spelling, or try one of these:</span></div><div id="tryempty">Try: <button data-try="High Output Management">High Output Management</button><button data-try="Lord of the Flies">Lord of the Flies</button><button data-try="Pride and Prejudice">Pride and Prejudice</button></div>';
+    resultsEl.innerHTML = '<div class="empty">No matches for that query.<br><span class="etips">Try fewer words, check spelling, or try one of these:</span></div><div id="tryempty">Try: <button data-try="High Output Management">High Output Management</button><button data-try="Lord of the Flies">Lord of the Flies</button><button data-try="Pride and Prejudice">Pride and Prejudice</button></div>'
+      + ((cat === 'video' || cat === 'anime') ? '<div class="provpanel">' + provLinks(lastQuery) + '</div>' : '');
     return;
   }
   list.forEach((r, i) => {
@@ -795,9 +814,7 @@ function render(list) {
       (desc ? '<p class="desc">' + hi(desc) + '</p>' : '') +
       (d._avg ? '<p class="meta"><span class="stars">' + stars(d._avg) + '</span> ' + Number(d._avg).toFixed(1) + ' · ' + (d._cnt || 0) + ' ratings' + (d._want ? ' · want ' + d._want : '') + (d._read ? ' · read ' + d._read : '') + '</p>' : '') +
       '<p class="url"><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a></p>' +
-      ((cat === 'video' || cat === 'anime')
-        ? '<p class="dnote"><a href="https://www.justwatch.com/us/search?q=' + encodeURIComponent(String(r.title).slice(0, 80)) + '" target="_blank" rel="noopener">Where to watch legally</a></p>'
-        : '') +
+      ((cat === 'video' || cat === 'anime') ? provLinks(r.title) : '') +
       (r.ia
         ? '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + esc(fixMojibake(r.title)) + '">Download options</button></p>'
         : (r.yt
@@ -858,6 +875,7 @@ async function runSearch(raw, opts) {
     return;
   }
   const key = cat + ':' + norm(query);
+  lastQuery = query;
   const hit = cacheGet(key);
   document.body.classList.toggle('searched', query.length >= 4);
   lastWords = sig(words(query));
