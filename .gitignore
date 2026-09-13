@@ -2,3 +2,10 @@
 .opencode-data/
 .DS_Store
 *.log
+
+# Local secrets — NEVER commit. Production keys live in the Cloudflare dashboard
+# (Pages project → Settings → Variables and secrets). This file is only for
+# running `npx wrangler pages dev` locally.
+.dev.vars
+.env
+.env.*

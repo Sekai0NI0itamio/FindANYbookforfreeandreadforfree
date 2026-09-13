@@ -429,45 +429,41 @@ async function liveMusic(q, signal) {
   }));
 }
 
-// ---- Legal "where to watch" for video & anime -------------------------------
-// TMDB watch-provider data (powered by JustWatch) lists which legal services
-// carry a title and whether they are free ad-supported, free, or subscription.
-// Free key: themoviedb.org -> Settings -> API. No key = Internet Archive only.
-const TMDB_KEY = '';
-const TMDB_REGION = 'US';
+// TMDB watch-provider data (powered by JustWatch) and the YouTube Data API are
+// reached through our own Cloudflare Pages Functions (/api/tmdb, /api/youtube),
+// so the API keys live server-side in encrypted environment variables and never
+// reach the browser. See functions/api/*.js. Without keys the site still works.
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w200';
+let tmdbOff = false;
+
+async function apiGet(path, signal) {
+  try {
+    const r = await fetch(path, { signal });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch { return null; }
+}
 
 async function tmdbSearch(q, kind, signal) {
-  if (!TMDB_KEY) return [];
-  const types = kind === 'anime' ? ['tv', 'movie'] : ['movie'];
+  if (tmdbOff) return [];
+  const j = await apiGet('/api/tmdb?action=search&kind=' + encodeURIComponent(kind) + '&q=' + encodeURIComponent(q), signal);
+  if (!j) return [];
+  if (j.configured === false) { tmdbOff = true; return []; }
   const out = [];
-  for (const type of types) {
-    try {
-      const r = await fetch('https://api.themoviedb.org/3/search/' + type +
-        '?api_key=' + encodeURIComponent(TMDB_KEY) +
-        '&query=' + encodeURIComponent(q) + '&include_adult=false', { signal });
-      if (!r.ok) continue;
-      const j = await r.json();
-      let rows = j.results || [];
-      if (kind === 'anime') {
-        const anim = rows.filter(m => (m.genre_ids || []).includes(16));
-        if (anim.length) rows = anim;
-      }
-      for (const m of rows.slice(0, 8)) {
-        out.push({
-          identifier: 'tmdb-' + type + '-' + m.id,
-          title: m.title || m.name || 'Untitled',
-          creator: '',
-          description: m.overview || '',
-          _src: 'TMDB',
-          _url: 'https://www.themoviedb.org/' + type + '/' + m.id,
-          _thumb: m.poster_path ? TMDB_IMG + m.poster_path : '',
-          _year: String(m.release_date || m.first_air_date || '').slice(0, 4),
-          _tmdb: { type, id: m.id },
-          _prov: null,
-        });
-      }
-    } catch (e) { if (e && e.name === 'AbortError') throw e; }
+  for (const m of (j.results || [])) {
+    const type = m._type === 'tv' ? 'tv' : 'movie';
+    out.push({
+      identifier: 'tmdb-' + type + '-' + m.id,
+      title: m.title || m.name || 'Untitled',
+      creator: '',
+      description: m.overview || '',
+      _src: 'TMDB',
+      _url: 'https://www.themoviedb.org/' + type + '/' + m.id,
+      _thumb: m.poster_path ? TMDB_IMG + m.poster_path : '',
+      _year: String(m.release_date || m.first_air_date || '').slice(0, 4),
+      _tmdb: { type, id: m.id },
+      _prov: null,
+    });
   }
   return out;
 }
@@ -487,32 +483,24 @@ function providerOf(wp) {
 async function tmdbProviders(items, signal) {
   await Promise.allSettled(items.map(async (it) => {
     if (!it || !it._tmdb) return;
-    try {
-      const r = await fetch('https://api.themoviedb.org/3/' + it._tmdb.type + '/' + it._tmdb.id +
-        '/watch/providers?api_key=' + encodeURIComponent(TMDB_KEY), { signal });
-      if (!r.ok) return;
-      const j = await r.json();
-      it._prov = providerOf((j.results || {})[TMDB_REGION]);
-      if (it._prov.link) it._url = it._prov.link;
-    } catch {}
+    const j = await apiGet('/api/tmdb?action=providers&type=' + it._tmdb.type + '&id=' + encodeURIComponent(it._tmdb.id), signal);
+    it._prov = providerOf(j && j.providers);
+    if (it._prov && it._prov.link) it._url = it._prov.link;
   }));
 }
 
-// ---- Official YouTube search + embedded player -------------------------------
-// Uses the official YouTube Data API (free key: console.cloud.google.com ->
-// enable "YouTube Data API v3" -> create an API key). Playback is the official
-// embedded player: no downloading, no proxying, fully compliant with YouTube's
-// terms (a link back to YouTube is required and included on every result).
-const YOUTUBE_KEY = '';
+// Official YouTube search + embedded player. Calls our own /api/youtube proxy
+// (functions/api/youtube.js) so the API key stays server-side. Playback uses the
+// official embedded player — no downloading, no proxying. A link back to
+// YouTube is shown on every result, as their terms require.
+let ytOff = false;
 
 async function youtubeSearch(q, signal) {
-  if (!YOUTUBE_KEY) return [];
-  const r = await fetch('https://www.googleapis.com/youtube/v3/search?part=snippet&type=video' +
-    '&maxResults=10&safeSearch=moderate&q=' + encodeURIComponent(q) +
-    '&key=' + encodeURIComponent(YOUTUBE_KEY), { signal });
-  if (!r.ok) return [];
-  const j = await r.json();
-  return (j.items || []).filter(it => it.id && it.id.videoId).map(it => {
+  if (ytOff) return [];
+  const j = await apiGet('/api/youtube?q=' + encodeURIComponent(q), signal);
+  if (!j) return [];
+  if (j.configured === false) { ytOff = true; return []; }
+  return (j.items || []).map(it => {
     const s = it.snippet || {};
     const th = (s.thumbnails && (s.thumbnails.medium || s.thumbnails.default)) || {};
     return {
@@ -760,7 +748,7 @@ function provStamps(r) {
 }
 
 async function enrichProviders(ranked, key, my) {
-  if (!TMDB_KEY) return;
+  if (tmdbOff) return;
   const items = ranked.filter(r => r.tmdb && !r.prov);
   if (!items.length) return;
   await tmdbProviders(items.map(r => r.doc), ctl && ctl.signal);
