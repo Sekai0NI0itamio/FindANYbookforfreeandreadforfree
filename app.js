@@ -215,14 +215,15 @@ function rankResults(docs, raw) {
 
 // Piracy search links — shown ONLY when user explicitly enables pirate mode
 // and accepts the disclaimer. These are deep-search links, not embedded streams.
+// Domains verified 2026-09-13; pirate sites change constantly.
 const PIRATE_SEARCH = {
   anime: [
-    ['AniWatch', 'https://aniwatch.to/search?keyword='],
-    ['MyAnime', 'https://myanimelist.net/anime.php?q='],
+    ['AniWatch', 'https://aniwatch.so/search?keyword='],
+    ['HiAnime', 'https://hianime.so/search?keyword='],
     ['9anime', 'https://9anime.to/search?keyword='],
-    ['AnimePahe', 'https://animepahe.ru/api?m=search&q='],
+    ['AnimePahe', 'https://animepahe.ru/search/'],
     ['Gogoanime', 'https://gogoanimehd.to/search.html?keyword='],
-    ['Zoro', 'https://aniwatch.to/search?keyword='],
+    ['AnikotoTV', 'https://anikototv.to/search/'],
   ],
   video: [
     ['LookMovie', 'https://lookmovie2.to/movies/search/?query='],
@@ -230,16 +231,14 @@ const PIRATE_SEARCH = {
     ['123movies', 'https://123moviesfree.net/search/?query='],
     ['Soap2day', 'https://soap2day.to/search?query='],
     ['YesMovies', 'https://yesmovies.ag/search/?q='],
-    ['Primewire', 'https://primewire.mx/search?keyword='],
   ],
   books: [
-    ['Z-Library', 'https://z-lib.gs/s/'],
-    ['Libgen', 'https://libgen.is/search.php?req='],
-    ['Anna\'s Archive', 'https://annas-archive.org/search?q='],
+    ['Z-Library', 'https://z-library.se/s/'],
+    ['Libgen', 'https://libgen.li/search.php?req='],
+    ['Anna\'s Archive', 'https://annas-archive.se/search?q='],
   ],
   music: [
     ['SoundCloud', 'https://soundcloud.com/search?q='],
-    ['Soulseek', 'https://www.slsknet.org/SoulseekQt/'],
   ],
 };
 
@@ -248,10 +247,10 @@ function pirateLinks(title) {
   const sites = PIRATE_SEARCH[cat];
   if (!sites || !sites.length) return '';
   const q = encodeURIComponent(String(title || '').slice(0, 70));
-  return '<p class="dnote pirate-links"><span class="pirate-tag">⛓ Pirate</span> ' +
+  return '<div class="pirate-row"><p class="dnote pirate-links"><span class="pirate-tag">⛓ Watch now</span> ' +
     sites.map(([n, b]) =>
-      '<a href="' + esc(b + q) + '" target="_blank" rel="noopener">' + esc(n) + '</a>')
-    .join(' · ') + '</p>';
+      '<a href="' + esc(b + q) + '" target="_blank" rel="noopener" class="pirate-btn">' + esc(n) + '</a>')
+    .join('') + '</p></div>';
 }
 
 function pirateServicesHtml() {
@@ -261,6 +260,21 @@ function pirateServicesHtml() {
   return '<div class="sline pirate-sline"><b>⛓ Pirate sources:</b> ' +
     sites.map(([n, u]) =>
       '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + esc(n) + '</a>').join('') + '</div>';
+}
+
+// Top-of-results pirate search box: shows one-click search buttons for the
+// current query across all pirate sites in the active category.
+function pirateSearchBox(query) {
+  if (!pirateMode || !query) return '';
+  const sites = PIRATE_SEARCH[cat];
+  if (!sites || !sites.length) return '';
+  const q = encodeURIComponent(String(query || '').slice(0, 70));
+  return '<div class="pirate-box">' +
+    '<p class="pirate-box-title">⛓ Search pirate sites for "' + esc(String(query).slice(0, 50)) + '"</p>' +
+    '<div class="pirate-box-btns">' +
+    sites.map(([n, b]) =>
+      '<a href="' + esc(b + q) + '" target="_blank" rel="noopener" class="pirate-btn-lg">' + esc(n) + '</a>')
+    .join('') + '</div></div>';
 }
 const SERVICES = {
   books: {
@@ -1012,8 +1026,15 @@ function render(list) {
   resultsEl.innerHTML = '';
   if (!list.length) {
     resultsEl.innerHTML = '<div class="empty">No matches for that query.<br><span class="etips">Try fewer words, check spelling, or try one of these:</span></div><div id="tryempty">Try: <button data-try="High Output Management">High Output Management</button><button data-try="Lord of the Flies">Lord of the Flies</button><button data-try="Pride and Prejudice">Pride and Prejudice</button></div>'
-      + ((cat === 'video' || cat === 'anime') ? '<div class="provpanel">' + provLinks(lastQuery) + '</div>' : '');
+      + ((cat === 'video' || cat === 'anime') ? '<div class="provpanel">' + provLinks(lastQuery) + '</div>' : '')
+      + pirateSearchBox(lastQuery);
     return;
+  }
+  // Pirate search box goes ABOVE all legal results when pirate mode is on
+  if (pirateMode) {
+    const box = document.createElement('div');
+    box.innerHTML = pirateSearchBox(lastQuery);
+    resultsEl.appendChild(box);
   }
   list.forEach((r, i) => {
     const d = r.doc;
@@ -1043,8 +1064,8 @@ function render(list) {
       (desc ? '<p class="desc">' + hi(desc) + '</p>' : '') +
       (d._avg ? '<p class="meta"><span class="stars">' + stars(d._avg) + '</span> ' + Number(d._avg).toFixed(1) + ' · ' + (d._cnt || 0) + ' ratings' + (d._want ? ' · want ' + d._want : '') + (d._read ? ' · read ' + d._read : '') + '</p>' : '') +
       '<p class="url"><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a></p>' +
-      ((cat === 'video' || cat === 'anime') ? provLinks(r.title) : '') +
       ((cat === 'video' || cat === 'anime' || cat === 'books' || cat === 'music') ? pirateLinks(r.title) : '') +
+      ((cat === 'video' || cat === 'anime') ? provLinks(r.title) : '') +
       (r.ia
         ? '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + esc(fixMojibake(r.title)) + '">Download options</button></p>'
         : '') +
