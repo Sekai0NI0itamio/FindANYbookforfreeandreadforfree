@@ -26,6 +26,9 @@ body:not(.searched) #brand{padding:0 0 3vh}
 #try button:hover,#tryempty button:hover{border-color:var(--amber);color:var(--amber)}
 body.searched #try{display:none}
 #tryempty{text-align:center;margin:0 0 30px}
+#services{max-width:720px;margin:12px auto 0;text-align:center;font-size:12.5px;color:var(--muted);line-height:2.1}
+#services a{color:var(--oxblood);margin:0 7px;white-space:nowrap;display:inline-block}
+body.searched #services{display:none}
 mark{background:#ecd9a8;color:inherit;border-radius:2px;padding:0 1px}
 body.searched #masthead{position:sticky;top:0;z-index:20;background:var(--paper);border-bottom:2px solid var(--ink);padding:14px 0 8px}
 body.searched #brand{padding:0}

@@ -94,7 +94,7 @@ function cacheSet(k, d) {
 
 const CATS = {
   books: { media: 'texts', coll: '', ph: 'Title — e.g. High Output Management' },
-  video: { media: 'movies', coll: '(collection:feature_films OR collection:moviesandfilms)', ph: 'Film title — e.g. Night of the Living Dead' },
+  video: { media: 'movies', coll: '(collection:feature_films OR collection:moviesandfilms OR collection:classic_cartoons)', ph: 'Film title — e.g. Night of the Living Dead' },
   anime: { media: 'movies', coll: 'collection:animationandcartoons', ph: 'Animated title…' },
   music: { media: 'audio', coll: '', ph: 'Artist or track — e.g. Beethoven' },
 };
@@ -133,6 +133,7 @@ async function fetchSearch(q, signal) {
   params.set('rows', '20');
   params.set('page', '1');
   params.set('output', 'json');
+  params.append('sort[]', 'downloads desc');
   const r = await fetch('https://archive.org/advancedsearch.php?' + params.toString(), { signal });
   if (!r.ok) throw new Error('HTTP ' + r.status);
   const j = await r.json();
@@ -193,7 +194,7 @@ function rankResults(docs, raw) {
     const flag = d['access-restricted-item'];
     const access = accessOf(d);
     const score = exact * 1000 + baseExact * 800 + recall * 200 + precision * 300 + authorHit * 150 + (pages != null ? Math.min(pages, 2000) / 100 : 0) + (d.description ? 5 : 0) - junk - mismatch * 500;
-    out.push({ doc: d, title, coverage, exact, mismatch, pages, print, access, score, src: 'Internet Archive', note: 'Stream or download', url: 'https://archive.org/details/' + id });
+    out.push({ doc: d, title, coverage, exact, mismatch, pages, print, access, score, src: 'Internet Archive', note: 'Stream or download', ia: true, url: 'https://archive.org/details/' + id });
   }
   const tier = { free: 0, borrow: 1, unknown: 2, pay: 3 };
   out.sort((a, b) => {
@@ -204,6 +205,47 @@ function rankResults(docs, raw) {
     return (b.pages || 0) - (a.pages || 0);
   });
   return out;
+}
+
+// Curated directory of free AND legal services per category. Links go to the
+// official company sites — safe to publish, safe to monetise.
+const SERVICES = {
+  books: [
+    ['Project Gutenberg', 'https://www.gutenberg.org'],
+    ['Open Library', 'https://openlibrary.org'],
+    ['Standard Ebooks', 'https://standardebooks.org'],
+    ['LibriVox audiobooks', 'https://librivox.org'],
+  ],
+  video: [
+    ['Tubi', 'https://tubitv.com'],
+    ['Pluto TV', 'https://pluto.tv'],
+    ['Plex free movies', 'https://watch.plex.tv'],
+    ['YouTube official channels', 'https://www.youtube.com'],
+    ['Kanopy (library card)', 'https://www.kanopy.com'],
+  ],
+  anime: [
+    ['Crunchyroll free tier', 'https://www.crunchyroll.com'],
+    ['Tubi Anime', 'https://tubitv.com/category/anime'],
+    ['RetroCrush', 'https://www.retrocrush.tv'],
+    ['Pluto TV Anime', 'https://pluto.tv/live-tv/pluto-tv-anime'],
+    ['Ani-One Asia', 'https://www.youtube.com/@AniOneAsia'],
+  ],
+  music: [
+    ['Internet Archive', 'https://archive.org/details/audio'],
+    ['Live Music Archive', 'https://archive.org/details/etree'],
+    ['Openverse', 'https://openverse.org'],
+    ['Audius', 'https://audius.co'],
+    ['ccMixter', 'https://ccmixter.org'],
+    ['Jamendo', 'https://www.jamendo.com'],
+  ],
+};
+
+function renderServices() {
+  const row = document.getElementById('services');
+  if (!row) return;
+  const list = SERVICES[cat] || SERVICES.books;
+  row.innerHTML = 'Free &amp; legal: ' + list.map(([n, u]) =>
+    '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + esc(n) + '</a>').join('');
 }
 
 function freeLabel() {
@@ -333,9 +375,24 @@ async function audiusTracks(q, signal) {
   }));
 }
 
+// Live Music Archive: 300k+ concert recordings artists allow fans to tape & share.
+async function liveMusic(q, signal) {
+  const url = 'https://archive.org/advancedsearch.php?q=' + encodeURIComponent('collection:etree AND (' + luc(q).slice(0, 80) + ')') +
+    '&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=date&fl[]=description&sort[]=downloads%20desc&rows=15&output=json';
+  const r = await fetch(url, { signal });
+  if (!r.ok) throw new Error('etree ' + r.status);
+  const j = await r.json();
+  return ((j.response && j.response.docs) || []).map(d => ({
+    ...d,
+    _src: 'Live Music Archive',
+    _note: 'Free · artist-approved recording',
+    _ia: true,
+  }));
+}
+
 function otherSources(c, q, signal) {
   if (c === 'music') {
-    return Promise.allSettled([openverseAudio(q, signal), audiusTracks(q, signal)])
+    return Promise.allSettled([openverseAudio(q, signal), audiusTracks(q, signal), liveMusic(q, signal)])
       .then(rs => rs.flatMap(r => (r.status === 'fulfilled' ? r.value : [])));
   }
   return Promise.resolve([]);
@@ -355,9 +412,10 @@ function extrasToRanked(items, query) {
       mismatch: false,
       pages: null,
       print: false,
-      access: { kind: 'free', label: 'Free to access', cls: 'ok' },
+      access: { kind: 'free', label: freeLabel(), cls: 'ok' },
       src: d._src,
       note: d._note,
+      ia: !!d._ia,
       url: d._url,
       thumb: d._thumb,
       dur: d._dur,
@@ -545,7 +603,7 @@ function render(list) {
       (desc ? '<p class="desc">' + hi(desc) + '</p>' : '') +
       (d._avg ? '<p class="meta"><span class="stars">' + stars(d._avg) + '</span> ' + Number(d._avg).toFixed(1) + ' · ' + (d._cnt || 0) + ' ratings' + (d._want ? ' · want ' + d._want : '') + (d._read ? ' · read ' + d._read : '') + '</p>' : '') +
       '<p class="url"><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a></p>' +
-      (r.src === 'Internet Archive'
+      (r.ia
         ? '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + esc(fixMojibake(r.title)) + '">Download options</button></p>'
         : (r.note ? '<p class="dnote">' + esc(r.note) + '</p>' : '')) +
       '</div>';
@@ -641,10 +699,11 @@ async function runSearch(raw, opts) {
       try {
         const ex = await otherSources(cat, query, ctl.signal);
         if (my !== runSeq) return;
-        const iaTop = combined.slice(0, 12);
-        const ov = extrasToRanked(ex.filter(x => x._src === 'Openverse'), query).slice(0, 6);
-        const au = extrasToRanked(ex.filter(x => x._src === 'Audius'), query).slice(0, 6);
-        combined = iaTop.concat(ov, au);
+        const iaTop = combined.slice(0, 10);
+        const lma = extrasToRanked(ex.filter(x => x._src === 'Live Music Archive'), query).slice(0, 5);
+        const ov = extrasToRanked(ex.filter(x => x._src === 'Openverse'), query).slice(0, 3);
+        const au = extrasToRanked(ex.filter(x => x._src === 'Audius'), query).slice(0, 2);
+        combined = iaTop.concat(lma, ov, au);
       } catch {}
     }
     const ranked = sortDocs(combined).slice(0, 20);
@@ -699,6 +758,7 @@ resultsEl.addEventListener('click', (e) => {
 document.getElementById('cat').addEventListener('change', (e) => {
   cat = CATS[e.target.value] ? e.target.value : 'books';
   qEl.placeholder = CATS[cat].ph;
+  renderServices();
   clearTimeout(debounceT);
   syncUrl(qEl.value);
   if (qEl.value.trim().length >= 4) runSearch(qEl.value);
@@ -723,6 +783,7 @@ document.addEventListener('click', (e) => {
     document.getElementById('cat').value = c;
     qEl.placeholder = CATS[c].ph;
   }
+  renderServices();
   if (p && p.trim()) {
     qEl.value = p;
     runSearch(p);
