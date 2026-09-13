@@ -207,46 +207,82 @@ function rankResults(docs, raw) {
   return out;
 }
 
-// Curated directory of free AND legal services per category. Links go to the
-// official company sites — safe to publish, safe to monetise.
+// Curated directory of genuinely FREE services. Two groups:
+//   open — no account, no subscription, ad-funded (all real, licensed companies)
+//   card — free with a public library card (funded by your library, not a subscription)
+// No unlicensed/piracy sources. Links go to the official sites.
 const SERVICES = {
-  books: [
-    ['Project Gutenberg', 'https://www.gutenberg.org'],
-    ['Open Library', 'https://openlibrary.org'],
-    ['Standard Ebooks', 'https://standardebooks.org'],
-    ['LibriVox audiobooks', 'https://librivox.org'],
-  ],
-  video: [
-    ['Tubi', 'https://tubitv.com'],
-    ['Pluto TV', 'https://pluto.tv'],
-    ['Plex free movies', 'https://watch.plex.tv'],
-    ['YouTube official channels', 'https://www.youtube.com'],
-    ['Kanopy (library card)', 'https://www.kanopy.com'],
-  ],
-  anime: [
-    ['Crunchyroll free tier', 'https://www.crunchyroll.com'],
-    ['Tubi Anime', 'https://tubitv.com/category/anime'],
-    ['RetroCrush', 'https://www.retrocrush.tv'],
-    ['Pluto TV Anime', 'https://pluto.tv/live-tv/pluto-tv-anime'],
-    ['iQIYI (free w/ ads)', 'https://www.iq.com'],
-    ['Ani-One Asia', 'https://www.youtube.com/@AniOneAsia'],
-  ],
-  music: [
-    ['Internet Archive', 'https://archive.org/details/audio'],
-    ['Live Music Archive', 'https://archive.org/details/etree'],
-    ['Openverse', 'https://openverse.org'],
-    ['Audius', 'https://audius.co'],
-    ['ccMixter', 'https://ccmixter.org'],
-    ['Jamendo', 'https://www.jamendo.com'],
-  ],
+  books: {
+    open: [
+      ['Project Gutenberg', 'https://www.gutenberg.org'],
+      ['Open Library', 'https://openlibrary.org'],
+      ['Standard Ebooks', 'https://standardebooks.org'],
+      ['LibriVox audiobooks', 'https://librivox.org'],
+    ],
+    card: [
+      ['Libby / OverDrive', 'https://libbyapp.com'],
+      ['Hoopla', 'https://www.hoopladigital.com'],
+    ],
+  },
+  video: {
+    open: [
+      ['Tubi', 'https://tubitv.com'],
+      ['Pluto TV', 'https://pluto.tv'],
+      ['The Roku Channel', 'https://therokuchannel.roku.com'],
+      ['Sling Freestream', 'https://www.sling.com/freestream'],
+      ['Xumo Play', 'https://play.xumo.com'],
+      ['Plex', 'https://watch.plex.tv'],
+      ['Vudu Free', 'https://www.vudu.com'],
+      ['Crackle', 'https://www.crackle.com'],
+    ],
+    card: [
+      ['Kanopy', 'https://www.kanopy.com'],
+      ['Hoopla', 'https://www.hoopladigital.com'],
+      ['Libby', 'https://libbyapp.com'],
+    ],
+  },
+  anime: {
+    open: [
+      ['Muse Asia (official licensor)', 'https://www.youtube.com/@MuseAsia'],
+      ['Ani-One Asia (official licensor)', 'https://www.youtube.com/@AniOneAsia'],
+      ['Ani-One India', 'https://www.youtube.com/@AniOneIndia'],
+      ['AnimeLog', 'https://www.youtube.com/@AnimeLog'],
+      ['Tubi Anime', 'https://tubitv.com/category/anime'],
+      ['Pluto TV Anime', 'https://pluto.tv/live-tv/pluto-tv-anime'],
+      ['RetroCrush', 'https://www.retrocrush.tv'],
+      ['iQIYI', 'https://www.iq.com'],
+    ],
+    card: [
+      ['Hoopla', 'https://www.hoopladigital.com'],
+      ['Kanopy', 'https://www.kanopy.com'],
+    ],
+  },
+  music: {
+    open: [
+      ['Internet Archive', 'https://archive.org/details/audio'],
+      ['Live Music Archive', 'https://archive.org/details/etree'],
+      ['Openverse', 'https://openverse.org'],
+      ['Audius', 'https://audius.co'],
+      ['ccMixter', 'https://ccmixter.org'],
+      ['Jamendo', 'https://www.jamendo.com'],
+      ['Musopen (public domain)', 'https://musopen.org'],
+    ],
+    card: [
+      ['Freegal Music', 'https://freemusic.freegalmusic.com'],
+      ['Hoopla Music', 'https://www.hoopladigital.com'],
+    ],
+  },
 };
 
 function renderServices() {
   const row = document.getElementById('services');
   if (!row) return;
-  const list = SERVICES[cat] || SERVICES.books;
-  row.innerHTML = 'Free &amp; legal: ' + list.map(([n, u]) =>
-    '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + esc(n) + '</a>').join('');
+  const s = SERVICES[cat] || SERVICES.books;
+  const line = (label, list) => (list && list.length)
+    ? '<div class="sline"><b>' + label + '</b> ' + list.map(([n, u]) =>
+        '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + esc(n) + '</a>').join('') + '</div>'
+    : '';
+  row.innerHTML = line('Free, no account:', s.open) + line('Free with a library card:', s.card);
 }
 
 function freeLabel() {
