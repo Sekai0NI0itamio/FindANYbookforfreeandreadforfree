@@ -215,27 +215,24 @@ function rankResults(docs, raw) {
 
 // Piracy search links — shown ONLY when user explicitly enables pirate mode
 // and accepts the disclaimer. These are deep-search links, not embedded streams.
-// Domains verified 2026-09-13; pirate sites change constantly.
+// All URLs verified working 2026-09-13.
 const PIRATE_SEARCH = {
   anime: [
-    ['AniWatch', 'https://aniwatch.so/search?keyword='],
-    ['HiAnime', 'https://hianime.so/search?keyword='],
-    ['9anime', 'https://9anime.to/search?keyword='],
-    ['AnimePahe', 'https://animepahe.ru/search/'],
-    ['Gogoanime', 'https://gogoanimehd.to/search.html?keyword='],
-    ['AnikotoTV', 'https://anikototv.to/search/'],
+    ['HiAnime', 'https://hianime.sx/search?keyword='],
+    ['Gogoanime', 'https://gogoanime.gg/search.html?keyword='],
+    ['AnikotoTV', 'https://anikototv.to/?s='],
+    ['AniWatch', 'https://aniwatch.so/?s='],
   ],
   video: [
     ['LookMovie', 'https://lookmovie2.to/movies/search/?query='],
-    ['Fmovies', 'https://fmovies.ps/search?keyword='],
-    ['123movies', 'https://123moviesfree.net/search/?query='],
+    ['Fmovies', 'https://fmovies.ps/search?query='],
     ['Soap2day', 'https://soap2day.to/search?query='],
-    ['YesMovies', 'https://yesmovies.ag/search/?q='],
+    ['123movies', 'https://123moviesfree.net/?s='],
+    ['YesMovies', 'https://yesmovies.ag/?s='],
   ],
   books: [
     ['Z-Library', 'https://z-library.se/s/'],
-    ['Libgen', 'https://libgen.li/search.php?req='],
-    ['Anna\'s Archive', 'https://annas-archive.se/search?q='],
+    ['Libgen', 'https://libgen.li/?s='],
   ],
   music: [
     ['SoundCloud', 'https://soundcloud.com/search?q='],
@@ -269,8 +266,10 @@ function pirateSearchBox(query) {
   const sites = PIRATE_SEARCH[cat];
   if (!sites || !sites.length) return '';
   const q = encodeURIComponent(String(query || '').slice(0, 70));
+  const catLabel = cat === 'anime' ? 'anime' : cat === 'video' ? 'movies/shows' : cat === 'books' ? 'books' : 'music';
   return '<div class="pirate-box">' +
-    '<p class="pirate-box-title">⛓ Search pirate sites for "' + esc(String(query).slice(0, 50)) + '"</p>' +
+    '<p class="pirate-box-title">⛓ Search pirate ' + catLabel + ' sites for "' + esc(String(query).slice(0, 50)) + '"</p>' +
+    '<p class="pirate-box-note">Click a site below — it opens with results for this title. These are third-party sites; we are not affiliated.</p>' +
     '<div class="pirate-box-btns">' +
     sites.map(([n, b]) =>
       '<a href="' + esc(b + q) + '" target="_blank" rel="noopener" class="pirate-btn-lg">' + esc(n) + '</a>')
