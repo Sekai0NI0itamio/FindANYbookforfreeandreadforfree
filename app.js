@@ -678,6 +678,17 @@ function interleaveBy(lists) {
   return out;
 }
 
+// Info-only databases must never wear a "Free to watch/read" stamp — that is
+// what sent you to a Kitsu page with no play button. Only playable sources
+// (Archive, Audius, Apple previews, Gutenberg…) get the free stamp.
+const META_STAMP = {
+  'MyAnimeList': 'Info only · use providers below',
+  'Kitsu': 'Info only · use providers below',
+  'AniList': 'Info only · use providers below',
+  'TVMaze': 'Info only · use providers below',
+  'MusicBrainz': 'Metadata · find free recordings',
+  'Google Books': 'Preview · check free sources',
+};
 function extrasToRanked(items, query) {
   const sq = new Set(sig(words(query)));
   return items.map(d => {
@@ -685,6 +696,8 @@ function extrasToRanked(items, query) {
     let hits = 0;
     for (const w of sq) if (tw.has(w)) hits++;
     const cov = sq.size ? hits / sq.size : 0;
+    const meta = META_STAMP[d._src];
+    const borrow = d._src === 'Open Library';
     return {
       doc: d,
       title: d.title,
@@ -692,7 +705,11 @@ function extrasToRanked(items, query) {
       mismatch: false,
       pages: null,
       print: false,
-      access: { kind: 'free', label: freeLabel(), cls: 'ok' },
+      access: meta
+        ? { kind: 'unknown', label: meta, cls: 'unknown' }
+        : borrow
+          ? { kind: 'borrow', label: 'Borrow free with account', cls: 'borrow' }
+          : { kind: 'free', label: freeLabel(), cls: 'ok' },
       src: d._src,
       note: d._note,
       ia: !!d._ia,
@@ -866,7 +883,7 @@ const FREE_SEARCH = [
 
 function provLinks(title) {
   const q = encodeURIComponent(String(title || '').slice(0, 70));
-  return '<p class="dnote">Find it free on: ' + FREE_SEARCH.map(([n, b]) =>
+  return '<p class="dnote">▶ Watch free on: ' + FREE_SEARCH.map(([n, b]) =>
     '<a href="' + esc(b + q) + '" target="_blank" rel="noopener">' + esc(n) + '</a>').join(' · ') + '</p>';
 }
 
