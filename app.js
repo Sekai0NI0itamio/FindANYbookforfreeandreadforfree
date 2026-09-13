@@ -7,6 +7,11 @@ let debounceT = 0;
 let runSeq = 0;
 let animT = 0;
 let liveCount = 0;
+let pirateMode = false;
+
+// Pirate mode is opt-in + requires disclaimer agreement.
+// Default is OFF. Persists in localStorage so the user only agrees once.
+try { pirateMode = localStorage.getItem('ffp:pirate') === 'on'; } catch {}
 
 // Issue tracking (Sentry, free tier, email-only signup). Activate: paste your
 // public DSN below. Until then this block does nothing and loads nothing.
@@ -208,10 +213,55 @@ function rankResults(docs, raw) {
   return out;
 }
 
-// Curated directory of genuinely FREE services. Two groups:
-//   open — no account, no subscription, ad-funded (all real, licensed companies)
-//   card — free with a public library card (funded by your library, not a subscription)
-// No unlicensed/piracy sources. Links go to the official sites.
+// Piracy search links — shown ONLY when user explicitly enables pirate mode
+// and accepts the disclaimer. These are deep-search links, not embedded streams.
+const PIRATE_SEARCH = {
+  anime: [
+    ['AniWatch', 'https://aniwatch.to/search?keyword='],
+    ['MyAnime', 'https://myanimelist.net/anime.php?q='],
+    ['9anime', 'https://9anime.to/search?keyword='],
+    ['AnimePahe', 'https://animepahe.ru/api?m=search&q='],
+    ['Gogoanime', 'https://gogoanimehd.to/search.html?keyword='],
+    ['Zoro', 'https://aniwatch.to/search?keyword='],
+  ],
+  video: [
+    ['LookMovie', 'https://lookmovie2.to/movies/search/?query='],
+    ['Fmovies', 'https://fmovies.ps/search?keyword='],
+    ['123movies', 'https://123moviesfree.net/search/?query='],
+    ['Soap2day', 'https://soap2day.to/search?query='],
+    ['YesMovies', 'https://yesmovies.ag/search/?q='],
+    ['Primewire', 'https://primewire.mx/search?keyword='],
+  ],
+  books: [
+    ['Z-Library', 'https://z-lib.gs/s/'],
+    ['Libgen', 'https://libgen.is/search.php?req='],
+    ['Anna\'s Archive', 'https://annas-archive.org/search?q='],
+  ],
+  music: [
+    ['SoundCloud', 'https://soundcloud.com/search?q='],
+    ['Soulseek', 'https://www.slsknet.org/SoulseekQt/'],
+  ],
+};
+
+function pirateLinks(title) {
+  if (!pirateMode) return '';
+  const sites = PIRATE_SEARCH[cat];
+  if (!sites || !sites.length) return '';
+  const q = encodeURIComponent(String(title || '').slice(0, 70));
+  return '<p class="dnote pirate-links"><span class="pirate-tag">⛓ Pirate</span> ' +
+    sites.map(([n, b]) =>
+      '<a href="' + esc(b + q) + '" target="_blank" rel="noopener">' + esc(n) + '</a>')
+    .join(' · ') + '</p>';
+}
+
+function pirateServicesHtml() {
+  if (!pirateMode) return '';
+  const sites = PIRATE_SEARCH[cat];
+  if (!sites || !sites.length) return '';
+  return '<div class="sline pirate-sline"><b>⛓ Pirate sources:</b> ' +
+    sites.map(([n, u]) =>
+      '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + esc(n) + '</a>').join('') + '</div>';
+}
 const SERVICES = {
   books: {
     open: [
@@ -285,7 +335,11 @@ function renderServices() {
     ? '<div class="sline"><b>' + label + '</b> ' + list.map(([n, u]) =>
         '<a href="' + esc(u) + '" target="_blank" rel="noopener">' + esc(n) + '</a>').join('') + '</div>'
     : '';
-  row.innerHTML = line('Free, no account:', s.open) + line('Free with a library card:', s.card);
+  const toggle = '<div class="sline pirate-toggle">' +
+    '<button id="pirate-toggle" class="' + (pirateMode ? 'on' : '') + '">' +
+    (pirateMode ? '⛓ Pirate: ON' : '⛓ Enable pirate sources') + '</button></div>';
+  row.innerHTML = line('Free, no account:', s.open) + line('Free with a library card:', s.card)
+    + pirateServicesHtml() + toggle;
 }
 
 function freeLabel() {
@@ -990,6 +1044,7 @@ function render(list) {
       (d._avg ? '<p class="meta"><span class="stars">' + stars(d._avg) + '</span> ' + Number(d._avg).toFixed(1) + ' · ' + (d._cnt || 0) + ' ratings' + (d._want ? ' · want ' + d._want : '') + (d._read ? ' · read ' + d._read : '') + '</p>' : '') +
       '<p class="url"><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a></p>' +
       ((cat === 'video' || cat === 'anime') ? provLinks(r.title) : '') +
+      ((cat === 'video' || cat === 'anime' || cat === 'books' || cat === 'music') ? pirateLinks(r.title) : '') +
       (r.ia
         ? '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + esc(fixMojibake(r.title)) + '">Download options</button></p>'
         : '') +
@@ -1199,6 +1254,68 @@ document.addEventListener('click', (e) => {
   syncUrl(qEl.value);
   runSearch(qEl.value);
   qEl.focus();
+});
+
+// --- Pirate mode toggle + disclaimer modal ---
+function disclaimerShell() {
+  let ov = document.getElementById('pirate-ov');
+  if (ov) return ov;
+  ov = document.createElement('div');
+  ov.id = 'pirate-ov';
+  ov.hidden = true;
+  ov.innerHTML =
+    '<div class="dlg" role="dialog" aria-modal="true" aria-labelledby="pirate-dtitle">' +
+    '<button class="x" aria-label="Close">×</button>' +
+    '<h3 id="pirate-dtitle">Pirate Sources Disclaimer</h3>' +
+    '<div class="dbody">' +
+    '<p><strong>These are unlicensed third-party sites.</strong> Find For Free does not host, embed, or control any content on them.</p>' +
+    '<p>By enabling pirate sources you acknowledge and agree that:</p>' +
+    '<ul>' +
+    '<li>You are solely responsible for your use of these links.</li>' +
+    '<li>Find For Free is <strong>not affiliated</strong> with any pirate site listed.</li>' +
+    '<li>You understand these sites may violate copyright laws in your jurisdiction.</li>' +
+    '<li>You assume all legal and personal risk.</li>' +
+    '</ul>' +
+    '<p class="dnote">Legal (free with ads / library) sources remain visible by default and are always recommended first.</p>' +
+    '<p><label class="agree-label"><input type="checkbox" id="pirate-agree"> I have read and agree to these terms</label></p>' +
+    '<p><button id="pirate-confirm" disabled>Enable pirate sources</button></p>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+  const cb = ov.querySelector('#pirate-agree');
+  const btn = ov.querySelector('#pirate-confirm');
+  const close = () => { ov.hidden = true; document.body.style.overflow = ''; };
+  cb.addEventListener('change', () => { btn.disabled = !cb.checked; });
+  btn.addEventListener('click', () => {
+    pirateMode = true;
+    try { localStorage.setItem('ffp:pirate', 'on'); } catch {}
+    close();
+    renderServices();
+    if (norm(qEl.value).length >= 4) runSearch(qEl.value);
+  });
+  ov.addEventListener('click', (e) => { if (e.target === ov || e.target.closest('.x')) close(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !ov.hidden) close(); });
+  return ov;
+}
+
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('#pirate-toggle');
+  if (!btn) return;
+  if (pirateMode) {
+    // Toggle OFF — instant, no disclaimer needed
+    pirateMode = false;
+    try { localStorage.removeItem('ffp:pirate'); } catch {}
+    renderServices();
+    if (norm(qEl.value).length >= 4) runSearch(qEl.value);
+  } else {
+    // Toggle ON — show disclaimer first
+    const ov = disclaimerShell();
+    ov.hidden = false;
+    document.body.style.overflow = 'hidden';
+    const cb = ov.querySelector('#pirate-agree');
+    const confirm = ov.querySelector('#pirate-confirm');
+    cb.checked = false;
+    confirm.disabled = true;
+  }
 });
 
 (function init() {
