@@ -399,20 +399,239 @@ async function openverseAudio(q, signal) {
 }
 
 async function audiusTracks(q, signal) {
-  const r = await fetch('https://api.audius.co/v1/tracks/search?query=' + encodeURIComponent(q) + '&limit=20&app_name=findforfree', { signal });
-  if (!r.ok) throw new Error('audius ' + r.status);
+  const qs = 'query=' + encodeURIComponent(q) + '&limit=20&app_name=findforfree';
+  const hosts = [
+    'https://api.audius.co/v1',
+    'https://discoveryprovider.audius.co/v1',
+    'https://discoveryprovider3.audius.co/v1',
+  ];
+  let lastErr = null;
+  for (const h of hosts) {
+    try {
+      const r = await fetch(h + '/tracks/search?' + qs, { signal });
+      if (!r.ok) { lastErr = new Error('audius ' + r.status); continue; }
+      const j = await r.json();
+      return (j.data || []).map(t => ({
+        identifier: 'au-' + String(t.id || '').slice(0, 12),
+        title: t.title || 'Untitled',
+        creator: (t.user && t.user.name) || '',
+        description: t.genre || '',
+        _src: 'Audius',
+        _note: 'Free streaming',
+        _url: t.permalink ? 'https://audius.co' + t.permalink : 'https://audius.co',
+        _thumb: (t.artwork && (t.artwork['150x150'] || t.artwork['480x480'])) || '',
+        _dur: fmtDur(t.duration),
+        _au: t.id,
+      }));
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw e;
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('audius failed');
+}
+
+// iTunes Search API: keyless, CORS-enabled (*), legal 30-sec previews + store links.
+async function itunesMusic(q, signal) {
+  const r = await fetch('https://itunes.apple.com/search?term=' + encodeURIComponent(q) +
+    '&media=music&entity=song&limit=20&country=US', { signal });
+  if (!r.ok) throw new Error('itunes ' + r.status);
   const j = await r.json();
-  return (j.data || []).map(t => ({
-    identifier: 'au-' + String(t.id || '').slice(0, 10),
-    title: t.title || 'Untitled',
-    creator: (t.user && t.user.name) || '',
-    description: t.genre || '',
-    _src: 'Audius',
-    _note: 'Free streaming',
-    _url: t.permalink ? 'https://audius.co' + t.permalink : 'https://audius.co',
-    _thumb: (t.artwork && (t.artwork['150x150'] || t.artwork['480x480'])) || '',
-    _dur: fmtDur(t.duration),
-    _au: t.id,
+  return ((j.results || []).map(t => ({
+    identifier: 'it-' + String(t.trackId || Math.abs(hashStr(t.trackName + t.artistName))),
+    title: t.trackName || 'Untitled',
+    creator: t.artistName || '',
+    description: (t.collectionName ? 'Album: ' + t.collectionName : '') +
+      (t.primaryGenreName ? ' · ' + t.primaryGenreName : ''),
+    _src: 'Apple Music',
+    _note: '30-sec preview · free',
+    _url: t.trackViewUrl || 'https://music.apple.com/us/search?term=' + encodeURIComponent(q),
+    _thumb: t.artworkUrl100 || '',
+    _dur: fmtDur((Number(t.trackTimeMillis) || 0) / 1000),
+    _preview: t.previewUrl || '',
+  })));
+}
+
+function hashStr(s) {
+  let h = 0;
+  s = String(s || '');
+  for (let i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) | 0; }
+  return h;
+}
+
+// MusicBrainz: keyless, CORS-enabled, the open music encyclopedia (metadata + links).
+async function musicBrainzRecs(q, signal) {
+  const r = await fetch('https://musicbrainz.org/ws/2/recording/?query=' +
+    encodeURIComponent('recording:"' + luc(q).slice(0, 60) + '"') + '&fmt=json&limit=10',
+    { signal, headers: { Accept: 'application/json' } });
+  if (!r.ok) throw new Error('musicbrainz ' + r.status);
+  const j = await r.json();
+  return ((j.recordings || []).map(t => {
+    const artist = ((t['artist-credit'] || []).map(a => a.name).filter(Boolean).join(', ')) || '';
+    return {
+      identifier: 'mb-' + String(t.id || '').slice(0, 8),
+      title: t.title || 'Untitled',
+      creator: artist,
+      description: (t.disambiguation ? t.disambiguation + ' · ' : '') +
+        (((t.releases || [])[0] || {}).title ? 'Release: ' + (t.releases[0].title) : ''),
+      _src: 'MusicBrainz',
+      _note: 'Open metadata · find free recordings',
+      _url: 'https://musicbrainz.org/recording/' + (t.id || ''),
+      _thumb: '',
+      _dur: fmtDur((Number(t.length) || 0) / 1000),
+    };
+  }));
+}
+
+// ---- Anime: keyless metadata with real fuzzy search (fixes "crayon shin" = zero) ----
+async function jikanAnime(q, signal) {
+  const r = await fetch('https://api.jikan.moe/v4/anime?q=' + encodeURIComponent(q) +
+    '&limit=10&sfw=true&order_by=members&sort=desc', { signal });
+  if (!r.ok) throw new Error('jikan ' + r.status);
+  const j = await r.json();
+  return ((j.data || []).map(a => ({
+    identifier: 'jk-' + String(a.mal_id || Math.abs(hashStr(a.title))),
+    title: a.title_english || a.title || 'Untitled',
+    creator: ((a.studios || []).map(s => s.name).join(', ')) || '',
+    description: String(a.synopsis || '').slice(0, 280),
+    _src: 'MyAnimeList',
+    _note: (a.score ? '★ ' + a.score + ' · ' : '') + (a.type || 'Anime') + ' · check free providers below',
+    _url: a.url || 'https://myanimelist.net/anime.php?q=' + encodeURIComponent(q),
+    _thumb: (a.images && a.images.jpg && (a.images.jpg.large_image_url || a.images.jpg.image_url)) || '',
+    _year: String((a.aired && a.aired.prop && a.aired.prop.from && a.aired.prop.from.year) || a.year || ''),
+  })));
+}
+
+async function kitsuAnime(q, signal) {
+  const r = await fetch('https://kitsu.io/api/edge/anime?filter[text]=' + encodeURIComponent(q) +
+    '&page[limit]=10', { signal, headers: { Accept: 'application/vnd.api+json' } });
+  if (!r.ok) throw new Error('kitsu ' + r.status);
+  const j = await r.json();
+  return ((j.data || []).map(a => {
+    const at = a.attributes || {};
+    return {
+      identifier: 'kt-' + String(a.id || '').slice(0, 10),
+      title: (at.titles && (at.titles.en || at.titles.en_us || at.canonicalTitle)) || 'Untitled',
+      creator: '',
+      description: String(at.synopsis || '').slice(0, 280),
+      _src: 'Kitsu',
+      _note: (at.averageRating ? '★ ' + (Number(at.averageRating) / 20).toFixed(1) + ' · ' : '') +
+        (at.showType || 'Anime') + ' · check free providers below',
+      _url: 'https://kitsu.io/anime/' + (a.id || ''),
+      _thumb: (at.posterImage && (at.posterImage.small || at.posterImage.medium)) || '',
+      _year: String((at.startDate || '').slice(0, 4)),
+    };
+  }));
+}
+
+async function anilistAnime(q, signal) {
+  const query = 'query($q:String){Page(perPage:8){media(search:$q,type:ANIME){id title{romaji english} description coverImage{medium large} siteUrl averageScore startDate{year} format}}}';
+  const r = await fetch('https://graphql.anilist.co', {
+    method: 'POST',
+    signal,
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ query, variables: { q } }),
+  });
+  if (!r.ok) throw new Error('anilist ' + r.status);
+  const j = await r.json();
+  const list = (j.data && j.data.Page && j.data.Page.media) || [];
+  return list.map(m => ({
+    identifier: 'al-' + String(m.id || '').slice(0, 10),
+    title: ((m.title || {}).english || (m.title || {}).romaji) || 'Untitled',
+    creator: '',
+    description: String((m.description || '').replace(/<[^>]+>/g, ' ')).slice(0, 280),
+    _src: 'AniList',
+    _note: (m.averageScore ? '★ ' + (Number(m.averageScore) / 20).toFixed(1) + ' · ' : '') +
+      (m.format || 'Anime') + ' · check free providers below',
+    _url: m.siteUrl || ('https://anilist.co/search/anime?search=' + encodeURIComponent(q)),
+    _thumb: (m.coverImage && (m.coverImage.large || m.coverImage.medium)) || '',
+    _year: String((m.startDate && m.startDate.year) || ''),
+  }));
+}
+
+// ---- Video: TVMaze (keyless, CORS) so licensed titles never return zero ----
+async function tvmazeShows(q, signal) {
+  const r = await fetch('https://api.tvmaze.com/search/shows?q=' + encodeURIComponent(q), { signal });
+  if (!r.ok) throw new Error('tvmaze ' + r.status);
+  const j = await r.json();
+  return ((Array.isArray(j) ? j : []).slice(0, 10).map(o => {
+    const s = o.show || {};
+    return {
+      identifier: 'tv-' + String(s.id || Math.abs(hashStr(s.name))),
+      title: s.name || 'Untitled',
+      creator: ((s.network && s.network.name) || (s.webChannel && s.webChannel.name) || ''),
+      description: String(s.summary || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 280),
+      _src: 'TVMaze',
+      _note: (s.status ? s.status + ' · ' : '') + 'check free providers below',
+      _url: s.officialSite || s.url || ('https://www.tvmaze.com/search?q=' + encodeURIComponent(q)),
+      _thumb: (s.image && (s.image.medium || s.image.original)) || '',
+      _year: String((s.premiered || '').slice(0, 4)),
+    };
+  }));
+}
+
+// ---- Books: Open Library + Gutenberg (Gutendex) + Google Books, all keyless ----
+async function olBooks(q, signal) {
+  const u = 'https://openlibrary.org/search.json?q=' + encodeURIComponent(q) +
+    '&limit=15&fields=key,title,author_name,first_publish_year,cover_i,ratings_average,ratings_count,number_of_pages_median';
+  const r = await fetch(u, { signal });
+  if (!r.ok) throw new Error('ol ' + r.status);
+  const j = await r.json();
+  return ((j.docs || []).map(o => ({
+    identifier: 'ol-' + String(o.key || o.title).replace(/[^a-z0-9]+/gi, '').slice(0, 12),
+    title: o.title || 'Untitled',
+    creator: (o.author_name || []).slice(0, 3).join(', '),
+    description: '',
+    _src: 'Open Library',
+    _note: 'Borrow free with account',
+    _url: 'https://openlibrary.org' + (o.key || ''),
+    _thumb: o.cover_i ? 'https://covers.openlibrary.org/b/id/' + o.cover_i + '-M.jpg' : '',
+    _year: String(o.first_publish_year || ''),
+    _avg: o.ratings_average, _cnt: o.ratings_count,
+    _med: o.number_of_pages_median,
+  })));
+}
+
+async function gutendexBooks(q, signal) {
+  const r = await fetch('https://gutendex.com/books/?search=' + encodeURIComponent(q), { signal });
+  if (!r.ok) throw new Error('gutendex ' + r.status);
+  const j = await r.json();
+  return ((j.results || []).slice(0, 10).map(b => {
+    const gid = b.id;
+    const img = (b.formats && (b.formats['image/jpeg'] || b.formats['image/png'])) || '';
+    return {
+      identifier: 'gx-' + String(gid),
+      title: b.title || 'Untitled',
+      creator: ((b.authors || []).map(a => a.name).join(', ')),
+      description: ((b.subjects || []).slice(0, 4).join(' · ')).slice(0, 200),
+      _src: 'Project Gutenberg',
+      _note: 'Free ebook · public domain',
+      _url: 'https://www.gutenberg.org/ebooks/' + gid,
+      _thumb: img,
+      _dur: '',
+    };
+  }));
+}
+
+async function googleBooks(q, signal) {
+  const r = await fetch('https://www.googleapis.com/books/v1/volumes?q=' +
+    encodeURIComponent(q) + '&maxResults=15', { signal });
+  if (!r.ok) throw new Error('gbooks ' + r.status);
+  const j = await r.json();
+  return (((j.items || [])).map(it => {
+    const v = it.volumeInfo || {};
+    const isbn = ((v.industryIdentifiers || []).map(x => x.identifier).join('')).slice(0, 13);
+    return {
+      identifier: 'gb-' + String(it.id || isbn).slice(0, 12),
+      title: v.title || 'Untitled',
+      creator: (v.authors || []).slice(0, 3).join(', '),
+      description: String(v.description || '').replace(/<[^>]+>/g, ' ').slice(0, 280),
+      _src: 'Google Books',
+      _note: 'Preview / free where available',
+      _url: v.infoLink || ('https://books.google.com/books?q=' + encodeURIComponent(q)),
+      _thumb: (v.imageLinks && (v.imageLinks.thumbnail || v.imageLinks.smallThumbnail)) || '',
+      _year: String((v.publishedDate || '').slice(0, 4)),
+    };
   }));
 }
 
@@ -432,10 +651,20 @@ async function liveMusic(q, signal) {
 }
 
 // Every source below is public, keyless and browser-callable. No API keys.
+// Failures are isolated via allSettled so one dead source never zeroes results.
 function otherSources(c, q, signal) {
-  if (c !== 'music') return Promise.resolve([]);
-  return Promise.allSettled([openverseAudio(q, signal), audiusTracks(q, signal), liveMusic(q, signal)])
-    .then(rs => rs.flatMap(r => (r.status === 'fulfilled' ? r.value : [])));
+  const jobs = [];
+  if (c === 'music') jobs.push(
+    itunesMusic(q, signal), audiusTracks(q, signal), liveMusic(q, signal),
+    musicBrainzRecs(q, signal), openverseAudio(q, signal),
+  );
+  else if (c === 'anime') jobs.push(
+    kitsuAnime(q, signal), anilistAnime(q, signal), jikanAnime(q, signal),
+  );
+  else if (c === 'video') jobs.push(tvmazeShows(q, signal));
+  else if (c === 'books') jobs.push(olBooks(q, signal), gutendexBooks(q, signal), googleBooks(q, signal));
+  if (!jobs.length) return Promise.resolve([]);
+  return Promise.allSettled(jobs).then(rs => rs.flatMap(r => (r.status === 'fulfilled' ? r.value : [])));
 }
 
 // Interleave by source so one catalogue can't dominate the top of the list —
@@ -626,6 +855,7 @@ function sortDocs(list) {
 // Per-title deep links into each free provider's own search. Keyless, so every
 // result can hand the user a direct path to check each free service in turn.
 const FREE_SEARCH = [
+  ['YouTube', 'https://www.youtube.com/results?search_query='],
   ['Tubi', 'https://tubitv.com/search/'],
   ['Pluto TV', 'https://pluto.tv/en/search?q='],
   ['Roku', 'https://therokuchannel.roku.com/search/'],
@@ -658,8 +888,20 @@ function audio() {
 }
 
 async function playAudio(ref, title) {
-  const [kind, val] = String(ref).split(':');
+  const idx = String(ref).indexOf(':');
+  const kind = idx >= 0 ? String(ref).slice(0, idx) : String(ref);
+  const val = idx >= 0 ? String(ref).slice(idx + 1) : '';
   const el = audio();
+  if (kind === 'pv') {
+    try {
+      const url = decodeURIComponent(val);
+      if (!/^https:\/\//.test(url)) return;
+      el.src = url;
+      el.hidden = false;
+      try { await el.play(); } catch {}
+    } catch {}
+    return;
+  }
   if (kind === 'au') {
     el.src = 'https://api.audius.co/v1/tracks/' + encodeURIComponent(val) + '/stream?app_name=findforfree';
     el.hidden = false;
@@ -689,6 +931,7 @@ async function playAudio(ref, title) {
 function playBtn(r) {
   if (cat !== 'music') return '';
   const t = esc(String(r.title || '').slice(0, 80));
+  if (r.doc && r.doc._preview) return '<p class="dl"><button data-play="pv:' + esc(encodeURIComponent(r.doc._preview)) + '" data-title="' + t + '">▶ Preview</button></p>';
   if (r.au) return '<p class="dl"><button data-play="au:' + esc(String(r.au)) + '" data-title="' + t + '">▶ Play</button></p>';
   if (r.ia) return '<p class="dl"><button data-play="ia:' + esc(r.doc.identifier) + '" data-title="' + t + '">▶ Play</button></p>';
   return '';
@@ -809,6 +1052,9 @@ async function runSearch(raw, opts) {
   liveCount = 0;
   animateStatus(cat === 'books' ? 'Searching Internet Archive' : 'Searching ' + cat);
   try {
+    // Fire the keyless meta sources NOW so they run in parallel with the
+    // Archive queries below instead of waiting behind them.
+    const extrasP = otherSources(cat, query, ctl.signal);
     const queries = buildQueries(query, cat);
     let docs = [];
     for (const qq of queries) {
@@ -825,23 +1071,50 @@ async function runSearch(raw, opts) {
     if (cat === 'books') await olEnrich(docs, query, ctl.signal);
     if (my !== runSeq) return;
     let combined = rankResults(docs, query).slice(0, 20);
-    if (cat === 'music') {
-      try {
-        const ex = await otherSources('music', query, ctl.signal);
-        if (my !== runSeq) return;
+    try {
+      const ex = await extrasP;
+      if (my !== runSeq) return;
+      if (ex.length) {
         const top = (src, n) => extrasToRanked(ex.filter(x => x._src === src), query)
           .sort((a, b) => b.score - a.score).slice(0, n);
-        const mixed = interleaveBy([
-          top('Audius', 8),
-          top('Openverse', 6),
-          top('Live Music Archive', 6),
-          sortDocs(combined).slice(0, 8),
-        ]);
-        mixed.sort((a, b) => (a.mismatch ? 1 : 0) - (b.mismatch ? 1 : 0));
-        combined = mixed;
-      } catch {}
-    }
-    const ranked = (cat === 'music' ? combined : sortDocs(combined)).slice(0, 20);
+        let mixed = null;
+        if (cat === 'music') {
+          mixed = interleaveBy([
+            top('Apple Music', 8),
+            top('Audius', 8),
+            top('Openverse', 6),
+            top('Live Music Archive', 6),
+            top('MusicBrainz', 6),
+            sortDocs(combined).slice(0, 8),
+          ]);
+        } else if (cat === 'anime') {
+          mixed = interleaveBy([
+            top('Kitsu', 8),
+            top('AniList', 6),
+            top('MyAnimeList', 6),
+            sortDocs(combined).slice(0, 8),
+          ]);
+        } else if (cat === 'video') {
+          mixed = interleaveBy([
+            top('TVMaze', 8),
+            sortDocs(combined).slice(0, 10),
+          ]);
+        } else if (cat === 'books') {
+          mixed = interleaveBy([
+            top('Open Library', 8),
+            top('Project Gutenberg', 6),
+            top('Google Books', 6),
+            sortDocs(combined).slice(0, 8),
+          ]);
+        }
+        if (mixed && mixed.length) {
+          mixed.sort((a, b) => (a.mismatch ? 1 : 0) - (b.mismatch ? 1 : 0));
+          combined = mixed;
+        }
+      }
+    } catch {}
+    const ranked = (cat === 'music' || cat === 'anime' || cat === 'video' || cat === 'books'
+      ? combined : sortDocs(combined)).slice(0, 20);
     cacheSet(key, ranked);
     if (norm(qEl.value) !== norm(query)) return;
     stopAnimate();

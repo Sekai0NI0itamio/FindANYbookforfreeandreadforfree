@@ -16,7 +16,11 @@
 - [ ] Download options button per row opens scrollable popup with all files grouped (main formats + more files); borrow/pay rows show access note instead
 - [ ] Brand Find For Free; category selector Books/Video/Anime/Music with per-category mediatype, placeholders, ?cat= restore
 - [ ] No piracy sources: anime lane uses legal IA animation collection, video uses public-domain film collections
-- [ ] Music merges IA + Live Music Archive + Openverse + Audius (verified: 10/5/3/2 rows)
+- [ ] Anime never zeroes on licensed titles: Kitsu + AniList + Jikan (all keyless CORS) merge with IA animation; e.g. "crayon shin" returns Crayon Shin-chan metadata + free-provider deep links
+- [ ] Video merges TVMaze (keyless) metadata with IA public-domain films
+- [ ] Books merge Open Library + Gutendex + Google Books (all keyless) with IA texts
+- [ ] Music uses iTunes previews + MusicBrainz + Audius (multi-host fallback) + LMA + Archive; Openverse kept best-effort; preview button plays 30-sec clips
+- [ ] One dead source never zeroes results (allSettled everywhere); Jikan 429 tolerated via Kitsu/AniList
 - [ ] Video/Anime: TMDB watch-providers badge per title (free with ads / free / subscription) once a free TMDB_KEY is set
 - [ ] YouTube: official Data API search + embedded official player (no download/proxy); needs free YOUTUBE_KEY
 - [ ] No Invidious/Piped/YouTube-downloader integration (built to evade blocks/DMCA; unreliable and would risk ad approval)
