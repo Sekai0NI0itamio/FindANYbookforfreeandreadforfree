@@ -795,6 +795,9 @@ function render(list) {
       (desc ? '<p class="desc">' + hi(desc) + '</p>' : '') +
       (d._avg ? '<p class="meta"><span class="stars">' + stars(d._avg) + '</span> ' + Number(d._avg).toFixed(1) + ' · ' + (d._cnt || 0) + ' ratings' + (d._want ? ' · want ' + d._want : '') + (d._read ? ' · read ' + d._read : '') + '</p>' : '') +
       '<p class="url"><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a></p>' +
+      ((cat === 'video' || cat === 'anime')
+        ? '<p class="dnote"><a href="https://www.justwatch.com/us/search?q=' + encodeURIComponent(String(r.title).slice(0, 80)) + '" target="_blank" rel="noopener">Where to watch legally</a></p>'
+        : '') +
       (r.ia
         ? '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + esc(fixMojibake(r.title)) + '">Download options</button></p>'
         : (r.yt
