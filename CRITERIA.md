@@ -15,3 +15,6 @@
 - [ ] Animated searching status with live count; rows accumulate per query stage
 - [ ] Download options button per row opens scrollable popup with all files grouped (main formats + more files); borrow/pay rows show access note instead
 - [ ] Brand Find For Free; category selector Books/Video/Anime/Music with per-category mediatype, placeholders, ?cat= restore
+- [ ] No piracy sources: anime lane uses legal IA animation collection, video uses public-domain film collections
+- [ ] Music merges IA + Live Music Archive + Openverse + Audius (verified: 10/5/3/2 rows)
+- [ ] Video/Anime: TMDB watch-providers badge per title (free with ads / free / subscription) once a free TMDB_KEY is set

@@ -390,9 +390,82 @@ async function liveMusic(q, signal) {
   }));
 }
 
+// ---- Legal "where to watch" for video & anime -------------------------------
+// TMDB watch-provider data (powered by JustWatch) lists which legal services
+// carry a title and whether they are free ad-supported, free, or subscription.
+// Free key: themoviedb.org -> Settings -> API. No key = Internet Archive only.
+const TMDB_KEY = '';
+const TMDB_REGION = 'US';
+const TMDB_IMG = 'https://image.tmdb.org/t/p/w200';
+
+async function tmdbSearch(q, kind, signal) {
+  if (!TMDB_KEY) return [];
+  const types = kind === 'anime' ? ['tv', 'movie'] : ['movie'];
+  const out = [];
+  for (const type of types) {
+    try {
+      const r = await fetch('https://api.themoviedb.org/3/search/' + type +
+        '?api_key=' + encodeURIComponent(TMDB_KEY) +
+        '&query=' + encodeURIComponent(q) + '&include_adult=false', { signal });
+      if (!r.ok) continue;
+      const j = await r.json();
+      let rows = j.results || [];
+      if (kind === 'anime') {
+        const anim = rows.filter(m => (m.genre_ids || []).includes(16));
+        if (anim.length) rows = anim;
+      }
+      for (const m of rows.slice(0, 8)) {
+        out.push({
+          identifier: 'tmdb-' + type + '-' + m.id,
+          title: m.title || m.name || 'Untitled',
+          creator: '',
+          description: m.overview || '',
+          _src: 'TMDB',
+          _url: 'https://www.themoviedb.org/' + type + '/' + m.id,
+          _thumb: m.poster_path ? TMDB_IMG + m.poster_path : '',
+          _year: String(m.release_date || m.first_air_date || '').slice(0, 4),
+          _tmdb: { type, id: m.id },
+          _prov: null,
+        });
+      }
+    } catch (e) { if (e && e.name === 'AbortError') throw e; }
+  }
+  return out;
+}
+
+function providerOf(wp) {
+  if (!wp) return { ads: [], free: [], sub: [], rent: false, buy: false, link: '' };
+  return {
+    ads: (wp.ads || []).map(p => ({ name: p.provider_name })),
+    free: (wp.free || []).map(p => ({ name: p.provider_name })),
+    sub: (wp.flatrate || []).map(p => ({ name: p.provider_name })),
+    rent: !!(wp.rent && wp.rent.length),
+    buy: !!(wp.buy && wp.buy.length),
+    link: wp.link || '',
+  };
+}
+
+async function tmdbProviders(items, signal) {
+  await Promise.allSettled(items.map(async (it) => {
+    if (!it || !it._tmdb) return;
+    try {
+      const r = await fetch('https://api.themoviedb.org/3/' + it._tmdb.type + '/' + it._tmdb.id +
+        '/watch/providers?api_key=' + encodeURIComponent(TMDB_KEY), { signal });
+      if (!r.ok) return;
+      const j = await r.json();
+      it._prov = providerOf((j.results || {})[TMDB_REGION]);
+      if (it._prov.link) it._url = it._prov.link;
+    } catch {}
+  }));
+}
+
 function otherSources(c, q, signal) {
   if (c === 'music') {
     return Promise.allSettled([openverseAudio(q, signal), audiusTracks(q, signal), liveMusic(q, signal)])
+      .then(rs => rs.flatMap(r => (r.status === 'fulfilled' ? r.value : [])));
+  }
+  if (c === 'video' || c === 'anime') {
+    return Promise.allSettled([tmdbSearch(q, c, signal)])
       .then(rs => rs.flatMap(r => (r.status === 'fulfilled' ? r.value : [])));
   }
   return Promise.resolve([]);
@@ -412,13 +485,18 @@ function extrasToRanked(items, query) {
       mismatch: false,
       pages: null,
       print: false,
-      access: { kind: 'free', label: freeLabel(), cls: 'ok' },
+      access: d._tmdb
+        ? { kind: 'unknown', label: 'Where to watch', cls: 'unknown' }
+        : { kind: 'free', label: freeLabel(), cls: 'ok' },
       src: d._src,
       note: d._note,
       ia: !!d._ia,
       url: d._url,
       thumb: d._thumb,
       dur: d._dur,
+      year: d._year,
+      tmdb: d._tmdb,
+      prov: null,
     };
   });
 }
@@ -569,6 +647,37 @@ function sortDocs(list) {
   return arr;
 }
 
+function provStamps(r) {
+  if (!r.tmdb) return '';
+  const p = r.prov;
+  if (!p) return '<span class="stamp prov unknown">checking providers…</span>';
+  const out = [];
+  for (const x of (p.ads || []).slice(0, 2)) out.push('<span class="stamp prov ok">' + esc(x.name) + ' · free with ads</span>');
+  for (const x of (p.free || []).slice(0, 2)) out.push('<span class="stamp prov ok">' + esc(x.name) + ' · free</span>');
+  if (!out.length) for (const x of (p.sub || []).slice(0, 2)) out.push('<span class="stamp prov pay">' + esc(x.name) + ' · subscription</span>');
+  if (!out.length) out.push('<span class="stamp prov ' + ((p.rent || p.buy) ? 'pay' : 'unknown') + '">' + ((p.rent || p.buy) ? 'Rent/buy only' : 'Not on free streaming') + '</span>');
+  return out.join('');
+}
+
+async function enrichProviders(ranked, key, my) {
+  if (!TMDB_KEY) return;
+  const items = ranked.filter(r => r.tmdb && !r.prov);
+  if (!items.length) return;
+  await tmdbProviders(items.map(r => r.doc), ctl && ctl.signal);
+  if (my !== runSeq) return;
+  for (const r of items) {
+    r.prov = (r.doc && r.doc._prov) || { ads: [], free: [], sub: [], rent: false, buy: false, link: '' };
+    if (r.doc && r.doc._url) r.url = r.doc._url;
+    const card = resultsEl.querySelector('[data-id="' + CSS.escape(r.doc.identifier) + '"]');
+    if (!card) continue;
+    const ph = card.querySelector('.stamp.prov');
+    if (ph) ph.outerHTML = provStamps(r);
+    const a = card.querySelector('.url a');
+    if (a && r.url) { a.href = r.url; a.textContent = r.url; }
+  }
+  cacheSet(key, ranked);
+}
+
 function render(list) {
   resultsEl.innerHTML = '';
   if (!list.length) {
@@ -581,7 +690,7 @@ function render(list) {
     const url = r.url || ('https://archive.org/details/' + id);
     const thumb = r.thumb || ('https://archive.org/services/img/' + encodeURIComponent(id));
     const by = fixMojibake(creatorText(d));
-    const yr = yearText(d);
+    const yr = r.year || yearText(d);
     const descRaw = fixMojibake(String(d.description || '')).replace(/\s+/g, ' ').trim();
     const desc = descRaw.length > 6 ? descRaw.slice(0, 280) : '';
     const dur = r.dur || one(d.runtime) || one(d.duration);
@@ -598,6 +707,7 @@ function render(list) {
       (r.pages != null ? '<span class="stamp pages">' + (r.print ? '≈' + r.pages + ' print ed.' : r.pages + ' scans') + '</span>' : (dur ? '<span class="stamp pages">' + esc(String(dur).slice(0, 16)) + '</span>' : '')) +
       '<span class="stamp ' + r.access.cls + '">' + esc(r.access.label) + '</span>' +
       '<span class="stamp src">' + esc(r.src || 'Internet Archive') + '</span>' +
+      provStamps(r) +
       (r.mismatch ? '<span class="stamp mismatch">possible mismatch</span>' : '') +
       '</div>' +
       (desc ? '<p class="desc">' + hi(desc) + '</p>' : '') +
@@ -672,6 +782,7 @@ async function runSearch(raw, opts) {
     statusEl.textContent = '';
     render(sortDocs(hit));
     if (cat === 'books') enrichCounts(hit, key, my).catch(() => {});
+    if (cat === 'video' || cat === 'anime') enrichProviders(hit, key, my).catch(() => {});
     if (opts && opts.fromCache) return;
   } else {
     resultsEl.innerHTML = '';
@@ -695,15 +806,20 @@ async function runSearch(raw, opts) {
     if (cat === 'books') await olEnrich(docs, query, ctl.signal);
     if (my !== runSeq) return;
     let combined = rankResults(docs, query).slice(0, 20);
-    if (cat === 'music') {
+    if (cat === 'music' || cat === 'video' || cat === 'anime') {
       try {
         const ex = await otherSources(cat, query, ctl.signal);
         if (my !== runSeq) return;
-        const iaTop = combined.slice(0, 10);
-        const lma = extrasToRanked(ex.filter(x => x._src === 'Live Music Archive'), query).slice(0, 5);
-        const ov = extrasToRanked(ex.filter(x => x._src === 'Openverse'), query).slice(0, 3);
-        const au = extrasToRanked(ex.filter(x => x._src === 'Audius'), query).slice(0, 2);
-        combined = iaTop.concat(lma, ov, au);
+        if (cat === 'music') {
+          const iaTop = combined.slice(0, 10);
+          const lma = extrasToRanked(ex.filter(x => x._src === 'Live Music Archive'), query).slice(0, 5);
+          const ov = extrasToRanked(ex.filter(x => x._src === 'Openverse'), query).slice(0, 3);
+          const au = extrasToRanked(ex.filter(x => x._src === 'Audius'), query).slice(0, 2);
+          combined = iaTop.concat(lma, ov, au);
+        } else {
+          const tm = extrasToRanked(ex.filter(x => x._src === 'TMDB'), query).slice(0, 10);
+          combined = combined.slice(0, 12).concat(tm);
+        }
       } catch {}
     }
     const ranked = sortDocs(combined).slice(0, 20);
@@ -713,6 +829,7 @@ async function runSearch(raw, opts) {
     statusEl.textContent = '';
     render(ranked);
     if (cat === 'books') enrichCounts(ranked, key, my).catch(() => {});
+    if (cat === 'video' || cat === 'anime') enrichProviders(ranked, key, my).catch(() => {});
   } catch (e) {
     if (e && e.name === 'AbortError') return;
     stopAnimate();
