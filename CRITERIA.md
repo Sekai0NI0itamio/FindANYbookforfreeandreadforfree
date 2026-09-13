@@ -18,3 +18,5 @@
 - [ ] No piracy sources: anime lane uses legal IA animation collection, video uses public-domain film collections
 - [ ] Music merges IA + Live Music Archive + Openverse + Audius (verified: 10/5/3/2 rows)
 - [ ] Video/Anime: TMDB watch-providers badge per title (free with ads / free / subscription) once a free TMDB_KEY is set
+- [ ] YouTube: official Data API search + embedded official player (no download/proxy); needs free YOUTUBE_KEY
+- [ ] No Invidious/Piped/YouTube-downloader integration (built to evade blocks/DMCA; unreliable and would risk ad approval)

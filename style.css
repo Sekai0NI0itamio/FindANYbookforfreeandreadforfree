@@ -77,6 +77,9 @@ body.searched #brand{text-align:left;display:flex;align-items:center;gap:14px;ma
 .dsec{font-family:var(--serif);font-style:italic;color:var(--muted);margin:14px 0 2px}
 .dnote{font-size:13px;color:var(--muted)}
 .dnote a{color:var(--oxblood)}
+.player{position:relative;padding-top:56.25%;background:#000;margin-bottom:12px}
+.player iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.dl .ytt{margin-left:10px;font-size:13px;color:var(--oxblood)}
 @media (max-width:560px){
   #brand h1{font-size:30px}
   #q{font-size:16px;padding:12px 14px}

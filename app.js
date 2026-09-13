@@ -228,6 +228,7 @@ const SERVICES = {
     ['Tubi Anime', 'https://tubitv.com/category/anime'],
     ['RetroCrush', 'https://www.retrocrush.tv'],
     ['Pluto TV Anime', 'https://pluto.tv/live-tv/pluto-tv-anime'],
+    ['iQIYI (free w/ ads)', 'https://www.iq.com'],
     ['Ani-One Asia', 'https://www.youtube.com/@AniOneAsia'],
   ],
   music: [
@@ -459,16 +460,58 @@ async function tmdbProviders(items, signal) {
   }));
 }
 
+// ---- Official YouTube search + embedded player -------------------------------
+// Uses the official YouTube Data API (free key: console.cloud.google.com ->
+// enable "YouTube Data API v3" -> create an API key). Playback is the official
+// embedded player: no downloading, no proxying, fully compliant with YouTube's
+// terms (a link back to YouTube is required and included on every result).
+const YOUTUBE_KEY = '';
+
+async function youtubeSearch(q, signal) {
+  if (!YOUTUBE_KEY) return [];
+  const r = await fetch('https://www.googleapis.com/youtube/v3/search?part=snippet&type=video' +
+    '&maxResults=10&safeSearch=moderate&q=' + encodeURIComponent(q) +
+    '&key=' + encodeURIComponent(YOUTUBE_KEY), { signal });
+  if (!r.ok) return [];
+  const j = await r.json();
+  return (j.items || []).filter(it => it.id && it.id.videoId).map(it => {
+    const s = it.snippet || {};
+    const th = (s.thumbnails && (s.thumbnails.medium || s.thumbnails.default)) || {};
+    return {
+      identifier: 'yt-' + it.id.videoId,
+      title: s.title || 'Untitled',
+      creator: s.channelTitle || '',
+      description: s.description || '',
+      _src: 'YouTube',
+      _note: '',
+      _url: 'https://www.youtube.com/watch?v=' + it.id.videoId,
+      _thumb: th.url || '',
+      _year: String(s.publishedAt || '').slice(0, 4),
+      _yt: it.id.videoId,
+    };
+  });
+}
+
+function openPlayer(videoId, title) {
+  const ov = dlShell(title || 'YouTube');
+  const body = ov.querySelector('.dbody');
+  ov.hidden = false;
+  document.body.style.overflow = 'hidden';
+  body.innerHTML =
+    '<div class="player"><iframe src="https://www.youtube-nocookie.com/embed/' + encodeURIComponent(videoId) +
+    '?autoplay=1&rel=0" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen title="Player"></iframe></div>' +
+    '<p class="dnote"><a href="https://www.youtube.com/watch?v=' + encodeURIComponent(videoId) +
+    '" target="_blank" rel="noopener">Open on YouTube</a> · video belongs to its creator · YouTube Terms of Service apply</p>';
+  body.querySelector('iframe').focus?.();
+}
+
 function otherSources(c, q, signal) {
-  if (c === 'music') {
-    return Promise.allSettled([openverseAudio(q, signal), audiusTracks(q, signal), liveMusic(q, signal)])
-      .then(rs => rs.flatMap(r => (r.status === 'fulfilled' ? r.value : [])));
-  }
-  if (c === 'video' || c === 'anime') {
-    return Promise.allSettled([tmdbSearch(q, c, signal)])
-      .then(rs => rs.flatMap(r => (r.status === 'fulfilled' ? r.value : [])));
-  }
-  return Promise.resolve([]);
+  const jobs = [];
+  if (c === 'music') jobs.push(openverseAudio(q, signal), audiusTracks(q, signal), liveMusic(q, signal));
+  if (c === 'video' || c === 'anime') jobs.push(tmdbSearch(q, c, signal));
+  if (c === 'video' || c === 'anime' || c === 'music') jobs.push(youtubeSearch(q, signal));
+  if (!jobs.length) return Promise.resolve([]);
+  return Promise.allSettled(jobs).then(rs => rs.flatMap(r => (r.status === 'fulfilled' ? r.value : [])));
 }
 
 function extrasToRanked(items, query) {
@@ -496,6 +539,7 @@ function extrasToRanked(items, query) {
       dur: d._dur,
       year: d._year,
       tmdb: d._tmdb,
+      yt: d._yt,
       prov: null,
     };
   });
@@ -715,7 +759,9 @@ function render(list) {
       '<p class="url"><a href="' + esc(url) + '" target="_blank" rel="noopener">' + esc(url) + '</a></p>' +
       (r.ia
         ? '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + esc(fixMojibake(r.title)) + '">Download options</button></p>'
-        : (r.note ? '<p class="dnote">' + esc(r.note) + '</p>' : '')) +
+        : (r.yt
+          ? '<p class="dl"><button data-yt="' + esc(r.yt) + '" data-title="' + esc(fixMojibake(r.title)) + '">▶ Watch here</button> <a class="ytt" href="' + esc(url) + '" target="_blank" rel="noopener">YouTube</a></p>'
+          : (r.note ? '<p class="dnote">' + esc(r.note) + '</p>' : ''))) +
       '</div>';
     const img = row.querySelector('img');
     img.onerror = () => { img.style.visibility = 'hidden'; };
@@ -815,10 +861,12 @@ async function runSearch(raw, opts) {
           const lma = extrasToRanked(ex.filter(x => x._src === 'Live Music Archive'), query).slice(0, 5);
           const ov = extrasToRanked(ex.filter(x => x._src === 'Openverse'), query).slice(0, 3);
           const au = extrasToRanked(ex.filter(x => x._src === 'Audius'), query).slice(0, 2);
-          combined = iaTop.concat(lma, ov, au);
+          const yt = extrasToRanked(ex.filter(x => x._src === 'YouTube'), query).slice(0, 3);
+          combined = iaTop.concat(lma, ov, au, yt);
         } else {
           const tm = extrasToRanked(ex.filter(x => x._src === 'TMDB'), query).slice(0, 10);
-          combined = combined.slice(0, 12).concat(tm);
+          const yt = extrasToRanked(ex.filter(x => x._src === 'YouTube'), query).slice(0, 5);
+          combined = combined.slice(0, 12).concat(tm, yt);
         }
       } catch {}
     }
@@ -869,7 +917,9 @@ qEl.addEventListener('keydown', (e) => {
 
 resultsEl.addEventListener('click', (e) => {
   const b = e.target.closest('[data-dl]');
-  if (b) openDownloads(b.getAttribute('data-dl'), b.getAttribute('data-title') || '', b.getAttribute('data-kind') || 'unknown');
+  if (b) { openDownloads(b.getAttribute('data-dl'), b.getAttribute('data-title') || '', b.getAttribute('data-kind') || 'unknown'); return; }
+  const v = e.target.closest('[data-yt]');
+  if (v) openPlayer(v.getAttribute('data-yt'), v.getAttribute('data-title') || '');
 });
 
 document.getElementById('cat').addEventListener('change', (e) => {
