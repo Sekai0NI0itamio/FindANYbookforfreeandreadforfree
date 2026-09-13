@@ -1059,6 +1059,7 @@ function actionBtns(r) {
       html += '<p class="dl"><a href="' + esc(url) + '" target="_blank" rel="noopener" class="action-link">Preview (Google Books)</a></p>';
     }
     if (r.ia) {
+      html += '<p class="dl"><a href="https://archive.org/details/' + esc(id) + '" target="_blank" rel="noopener" class="action-link action-read">Read free on Archive.org</a></p>';
       html += '<p class="dl"><button data-dl="' + esc(id) + '" data-kind="' + esc(r.access.kind) + '" data-title="' + t + '">Download options</button></p>';
     }
   }
@@ -1245,11 +1246,14 @@ async function runSearch(raw, opts) {
             sortDocs(combined).slice(0, 10),
           ]);
         } else if (cat === 'books') {
+          // Archive.org is the best free-to-read source (full text, downloads),
+          // so it goes first. Gutenberg is also fully free. OL borrow and
+          // Google Books preview are secondary.
           mixed = interleaveBy([
-            top('Open Library', 8),
-            top('Project Gutenberg', 6),
-            top('Google Books', 6),
-            sortDocs(combined).slice(0, 8),
+            sortDocs(combined).slice(0, 10),
+            top('Project Gutenberg', 8),
+            top('Open Library', 6),
+            top('Google Books', 4),
           ]);
         }
         if (mixed && mixed.length) {
